@@ -62,14 +62,16 @@ defmodule Summarizer.Anthropic do
       max_tokens: @max_tokens,
       system: @system_prompt,
       output_config: %{effort: "low"},
-      betas: [@fallback_beta],
       fallbacks: "default",
       messages: [%{role: "user", content: prompt}]
     }
 
+    # Over plain HTTP the beta opt-in is a header; only the SDKs take it as a
+    # `betas` body field.
     headers = [
       {"x-api-key", api_key()},
-      {"anthropic-version", @api_version}
+      {"anthropic-version", @api_version},
+      {"anthropic-beta", @fallback_beta}
     ]
 
     case Req.post(@endpoint, json: body, headers: headers, receive_timeout: @receive_timeout) do

@@ -55,17 +55,39 @@ defmodule HeadlineWriter do
     news_trim(original_text, summary_length)
   end
 
+  # How far over the cap a summary can be and still be worth trimming. Beyond
+  # this the model clearly ignored the length instruction, so the original text
+  # is the safer thing to cut down.
+  @overshoot_tolerance 1.5
+
   def choose_summary(original_text, {:ok, summary_text}, summary_length) do
     # sometimes the llm puts quotes around the summary, so we want to dequote it if that's the case
     dq_summary = dequote(summary_text)
-    return_text = if String.length(dq_summary) <= summary_length do
-      dq_summary
-    else
-      Logger.info(
-        "Summary is still too long after dequoting, using original text. Original length: #{String.length(original_text)}, Summary length: #{String.length(dq_summary)}, Max length: #{summary_length}"
-      )
-      original_text
-    end
+    summary_len = String.length(dq_summary)
+
+    return_text =
+      cond do
+        summary_len <= summary_length ->
+          dq_summary
+
+        # A summary a few characters over is still a summary. Trimming it beats
+        # falling back to the raw story, which is all boilerplate and captions
+        # at the front - that fallback threw away every summary of a real feed.
+        summary_len <= summary_length * @overshoot_tolerance ->
+          Logger.info(
+            "Summary of #{summary_len} is over the #{summary_length} limit; trimming it rather than the original (#{String.length(original_text)})."
+          )
+
+          dq_summary
+
+        true ->
+          Logger.warning(
+            "Summary of #{summary_len} far exceeds the #{summary_length} limit; using the original text (#{String.length(original_text)}) instead."
+          )
+
+          original_text
+      end
+
     news_trim(return_text, summary_length)
   end
 
@@ -83,12 +105,14 @@ defmodule HeadlineWriter do
           #   {:ok, short_hl} -> short_hl |> dequote()
           #   {:error, _} -> hl
           # end) |> news_trim(@headline_length)
-          result_hl = choose_summary(hl, summarize_text(hl, @headline_length), @headline_length)
+          result_hl =
+            choose_summary(hl, summarize_text(hl, @headline_length, :headline), @headline_length)
           # result_body = (case summarize_text(body, @body_length) do
           #   {:ok, short_body} -> short_body |> dequote()
           #   {:error, _} -> body
           # end) |> news_trim(@body_length)
-          result_body = choose_summary(body, summarize_text(body, @body_length), @body_length)
+          result_body =
+            choose_summary(body, summarize_text(body, @body_length, :body), @body_length)
           [String.trim(result_hl) <> to_string(options[:attribution]), result_body]
         end)
       end
@@ -207,14 +231,18 @@ defmodule HeadlineWriter do
     >>
   end
 
-  def summarize_text(text, max_length) when is_binary(text) and byte_size(text) <= max_length do
+  def summarize_text(text, max_length, kind \\ :body)
+
+  def summarize_text(text, max_length, _kind)
+      when is_binary(text) and byte_size(text) <= max_length do
     Logger.info(
       "Text is already within the maximum length of #{max_length} characters, skipping summarization."
     )
+
     {:ok, text}
   end
 
-  def summarize_text(text, max_length) when is_binary(text) do
-    Summarizer.summarize(text, max_length)
+  def summarize_text(text, max_length, kind) when is_binary(text) do
+    Summarizer.summarize(text, max_length, kind)
   end
 end

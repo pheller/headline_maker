@@ -72,15 +72,22 @@ defmodule Summarizer do
 
   @default_chain "ollama"
 
+  @typedoc "Which kind of text is being shortened - they want different prose."
+  @type kind :: :body | :headline
+
   @doc """
-  Summarize `text` to close to `max_length` characters.
+  Shorten `text` to fit `max_length` characters.
 
   Walks the configured chain and returns the first success. Returns
   `{:error, :no_provider}` when every provider is unconfigured or fails.
+
+  Output is run through `to_ascii/1`: feed text is normalized on the way in,
+  but a model's output never was, and this ends up in a NAPLPS renderer that
+  wants plain ASCII.
   """
-  @spec summarize(String.t(), pos_integer()) :: {:ok, String.t()} | {:error, term()}
-  def summarize(text, max_length) when is_binary(text) do
-    prompt = prompt_for(text, max_length)
+  @spec summarize(String.t(), pos_integer(), kind()) :: {:ok, String.t()} | {:error, term()}
+  def summarize(text, max_length, kind \\ :body) when is_binary(text) do
+    prompt = prompt_for(text, max_length, kind)
 
     chain()
     |> Enum.reduce_while({:error, :no_provider}, fn provider, _acc ->
@@ -96,12 +103,14 @@ defmodule Summarizer do
         true ->
           case provider.complete(prompt) do
             {:ok, response} ->
+              clean = to_ascii(response)
+
               Logger.info(
                 "Summarized with #{provider.name()}: requested #{max_length}, " <>
-                  "original #{String.length(text)}, result #{String.length(response)}"
+                  "original #{String.length(text)}, result #{String.length(clean)}"
               )
 
-              {:halt, {:ok, response}}
+              {:halt, {:ok, clean}}
 
             {:error, reason} ->
               Logger.warning("Summarizer #{provider.name()} failed: #{inspect(reason)}")
@@ -112,18 +121,60 @@ defmodule Summarizer do
   end
 
   @doc """
-  The summarization prompt, shared by every provider.
+  The prompt for one piece of text, shared by every provider so that swapping
+  providers changes the model and not the instruction.
 
-  Kept verbatim from the original single-provider implementation so that
-  swapping providers changes the model, not the instruction.
+  Two things the wording has to get right, both learned the hard way:
+
+  * The limit is stated as hard, and the target set below `max_length`. Asking
+    for something "close to" a maximum reliably lands just over it, and
+    `HeadlineWriter.choose_summary/3` then has to trim what came back.
+  * The real work on a wire feed is not compression. Story text arrives with
+    photo captions, agency credits, datelines, network boilerplate, duplicated
+    sentences, and the lede several paragraphs down. Asking only for a summary
+    does not ask for any of that to be fixed.
   """
-  @spec prompt_for(String.t(), pos_integer()) :: String.t()
-  def prompt_for(text, max_length) do
-    escaped_text = String.replace(text, "\"", "\\\"")
+  @spec prompt_for(String.t(), pos_integer(), kind()) :: String.t()
+  def prompt_for(text, max_length, kind \\ :body) do
+    instructions(kind, target_length(max_length)) <> "\n\n" <> text
+  end
 
-    "Summarize the text #{escaped_text} close to a maximum of #{max_length} characters, " <>
-      "keeping as much of the original meaning as possible. " <>
-      "Do not add ellipses or other indicators of truncation."
+  # Aim under the cap so ordinary overshoot still lands inside it.
+  @headroom 0.93
+
+  @doc "The length actually asked for, kept below the caller's hard cap."
+  @spec target_length(pos_integer()) :: pos_integer()
+  def target_length(max_length), do: max(1, trunc(max_length * @headroom))
+
+  defp instructions(:body, target) do
+    """
+    Rewrite the news story below as a single self-contained news brief of AT \
+    MOST #{target} characters. That is a hard limit - do not exceed it.
+
+    Lead with what happened. Drop photo captions, agency credits, datelines, \
+    timestamps, network boilerplate, and anything said twice. Keep the facts, \
+    names and numbers that matter. Write complete sentences in plain newspaper \
+    style.
+
+    Use ASCII characters only: straight quotes and apostrophes, a hyphen for \
+    any dash, and no ellipsis character. Reply with the brief itself only - no \
+    preamble, no quotation marks around it, no note about what you did.
+    """
+  end
+
+  defp instructions(:headline, target) do
+    """
+    Rewrite the news headline below in AT MOST #{target} characters. That is a \
+    hard limit - do not exceed it.
+
+    Keep the specific subject - who or what it is about - and cut everything \
+    that is not needed to understand the story at a glance. Plain newspaper \
+    style, no trailing punctuation.
+
+    Use ASCII characters only: straight quotes and apostrophes, a hyphen for \
+    any dash, and no ellipsis character. Reply with the headline itself only - \
+    no preamble, no quotation marks around it, no note about what you did.
+    """
   end
 
   @doc """
@@ -159,4 +210,42 @@ defmodule Summarizer do
   @doc "Comma-separated list of the names accepted by `--summarizer`."
   @spec known_providers() :: String.t()
   def known_providers, do: @providers |> Map.keys() |> Enum.sort() |> Enum.join(", ")
+
+  # Model output normalized for a renderer that wants plain ASCII. This is
+  # deliberately separate from `NewsFeeds.replace_utf_chars/1` and adds the two
+  # dashes that map leaves alone: `MemeorandumFeed` splits incoming stories on
+  # the em-dash, so rewriting it at ingestion would break that parse. Here we
+  # are past all parsing, so the dashes are safe to fold.
+  #
+  # Written as byte literals to keep this source ASCII.
+  @ascii_replacements %{
+    # left/right single quote
+    <<0xE2, 0x80, 0x98>> => "'",
+    <<0xE2, 0x80, 0x99>> => "'",
+    # left/right double quote
+    <<0xE2, 0x80, 0x9C>> => "\"",
+    <<0xE2, 0x80, 0x9D>> => "\"",
+    # ellipsis
+    <<0xE2, 0x80, 0xA6>> => "...",
+    # non-breaking space
+    <<0xC2, 0xA0>> => " ",
+    # em dash, en dash
+    <<0xE2, 0x80, 0x94>> => "-",
+    <<0xE2, 0x80, 0x93>> => "-"
+  }
+
+  @ascii_keys Map.keys(@ascii_replacements)
+
+  @doc """
+  Fold the punctuation a model is likely to emit down to ASCII.
+
+  Anything still non-ASCII after the substitutions is dropped, so nothing
+  multi-byte reaches the NAPLPS encoder.
+  """
+  @spec to_ascii(String.t()) :: String.t()
+  def to_ascii(text) do
+    text
+    |> String.replace(@ascii_keys, fn pat -> @ascii_replacements[pat] end)
+    |> String.replace(~r/[^\x00-\x7F]/u, "")
+  end
 end
