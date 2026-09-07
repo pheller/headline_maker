@@ -27,7 +27,14 @@ defmodule HeadlineMaker.MixProject do
       {:quinn, "~> 1.1.3"},
       {:floki, "~> 0.36"},
       {:prodigy_objects, git: "https://github.com/rrcook/prodigy_objects.git"},
-      {:naplps_writer, git: "https://github.com/rrcook/naplps_writer.git"}
+      # INTERIM: our fork carries NaplpsText (proportional metrics, hyphenation,
+      # line breaking) which the pre-wrapping work needs. Repoint to
+      # rrcook/naplps_writer once that is upstreamed.
+      #
+      # override: prodigy_objects depends on naplps_writer from rrcook's URL,
+      # and mix refuses two sources for one dep without being told which wins.
+      {:naplps_writer,
+       git: "https://github.com/pheller/naplps_writer.git", branch: "text-metrics", override: true}
     ]
   end
 end

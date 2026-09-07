@@ -29,6 +29,17 @@ defmodule HeadlineWriter do
   @headline_length 90
   @body_length 450
 
+  # Body text area, in GCU units. The field starts at x=4 and is 251 wide; the
+  # story begins at y=147 and must stop clear of the "Go to next page" row at
+  # y=55, which leaves eight rows at the current line pitch.
+  @body_left 4
+  @body_width 251
+  @body_top 147
+  @body_rows 8
+
+  # C0 text spacing steps one character height per row.
+  @line_pitch @text_height
+
   # Makes the debug delimiter available to other modules
   def debug_delimiter(), do: @debug_delimiter
 
@@ -37,6 +48,7 @@ defmodule HeadlineWriter do
     cond do
       String.at(text, 0) == "\"" and String.at(text, -1) == "\"" ->
         String.slice(text, 1, String.length(text) - 2)
+
       true ->
         text
     end
@@ -107,12 +119,14 @@ defmodule HeadlineWriter do
           # end) |> news_trim(@headline_length)
           result_hl =
             choose_summary(hl, summarize_text(hl, @headline_length, :headline), @headline_length)
+
           # result_body = (case summarize_text(body, @body_length) do
           #   {:ok, short_body} -> short_body |> dequote()
           #   {:error, _} -> body
           # end) |> news_trim(@body_length)
           result_body =
             choose_summary(body, summarize_text(body, @body_length, :body), @body_length)
+
           [String.trim(result_hl) <> to_string(options[:attribution]), result_body]
         end)
       end
@@ -182,16 +196,94 @@ defmodule HeadlineWriter do
       |> then(fn b -> setup_next(b, page_number, number_of_pages) end)
       |> draw(@cmd_field, [{4 / 256, 177 / 256}, {251 / 256, -1 * (178 - 53) / 256}])
       #    |> draw(@cmd_set_rect_outlined, [{2 / 256, 177 / 256}, {253 / 256, (-1 * (177 - 53)) / 256}])
+      # The wrap bytes stay on even though the text below arrives pre-broken.
+      # They cost two bytes, never fire when our measurements are right, and
+      # cost nothing on a renderer that wraps properly.
       |> append_byte(@gr_word_wrap_on)
-      # Headline color and position, can word wrap to next line
+      # Headline, centered by measured width rather than padded with spaces -
+      # the font is proportional, so a character count would not center it.
       |> select_color(@color_gray)
-      |> draw_text_abs(headline, {4 / 256, 167 / 256})
-      # Story color and position, can word wrap in the rest of the field
+      |> then(fn b ->
+        line = headline_line(headline)
+        draw_text_abs(b, line, {headline_x(line) / 256, 167 / 256})
+      end)
+      # Story, broken into lines here rather than left to the renderer: the
+      # reference renderer breaks mid-word, and pre-breaking is also what lets
+      # the generator check that its own output fits before uploading.
       |> select_color(@color_white)
-      |> draw_text_abs(story, {4 / 256, 147 / 256})
+      |> draw_story(story)
       |> append_byte(@gr_word_wrap_off)
 
     buffer
+  end
+
+  @doc """
+  The story text broken to the body field, capped at the rows that fit.
+
+  Returns at most `@body_rows` lines, each measured to sit within
+  `@body_width`.
+  """
+  @spec story_lines(String.t()) :: [String.t()]
+  def story_lines(story) do
+    lines = NaplpsText.wrap(story, @text_width, @body_width)
+
+    if length(lines) <= @body_rows do
+      lines
+    else
+      # The summarizer works to a character budget, which in a proportional
+      # font only approximates what fits. When it overshoots, trim to the last
+      # row and mark it rather than dropping the tail silently mid-sentence -
+      # a slightly short story still reads, and the warning says it happened.
+      Logger.warning(
+        "Story needs #{length(lines)} rows but only #{@body_rows} fit; trimming the tail."
+      )
+
+      lines
+      |> Enum.take(@body_rows)
+      |> List.update_at(-1, &ellipsize/1)
+    end
+  end
+
+  @doc "Whether a story fits the body area without trimming."
+  @spec fits?(String.t()) :: boolean()
+  def fits?(story),
+    do: length(NaplpsText.wrap(story, @text_width, @body_width)) <= @body_rows
+
+  # Drop whole words off the end until the line plus an ellipsis fits.
+  defp ellipsize(line) do
+    words = String.split(line, " ")
+
+    Enum.reduce_while(length(words)..1//-1, "...", fn n, _acc ->
+      candidate = (words |> Enum.take(n) |> Enum.join(" ")) <> "..."
+
+      if NaplpsText.text_width(@text_width, candidate) <= @body_width,
+        do: {:halt, candidate},
+        else: {:cont, "..."}
+    end)
+  end
+
+  @doc "The headline trimmed to a single row of the body field."
+  @spec headline_line(String.t()) :: String.t()
+  def headline_line(headline) do
+    case NaplpsText.wrap(headline, @text_width, @body_width) do
+      [single] -> single
+      [first | _] -> ellipsize(first)
+      [] -> ""
+    end
+  end
+
+  # Left edge that centers `text` in the body field.
+  defp headline_x(text) do
+    @body_left + round((@body_width - NaplpsText.text_width(@text_width, text)) / 2)
+  end
+
+  defp draw_story(buffer, story) do
+    story
+    |> story_lines()
+    |> Enum.with_index()
+    |> Enum.reduce(buffer, fn {line, i}, acc ->
+      draw_text_abs(acc, line, {@body_left / 256, (@body_top - i * @line_pitch) / 256})
+    end)
   end
 
   # If this is not the last page, put up the [Next] button
