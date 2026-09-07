@@ -89,11 +89,39 @@ defmodule Summarizer do
   def summarize(text, max_length, kind \\ :body) when is_binary(text) do
     prompt = prompt_for(text, max_length, kind)
 
+    case run(prompt) do
+      {:ok, response} ->
+        Logger.info(
+          "Summarized: requested #{max_length}, original #{String.length(text)}, " <>
+            "result #{String.length(response)}"
+        )
+
+        {:ok, response}
+
+      error ->
+        error
+    end
+  end
+
+  @doc """
+  Send an arbitrary prompt through the same provider chain.
+
+  `summarize/3` is for shortening one piece of text and owns its wording. This
+  is the escape hatch for callers with their own prompt - `NewsEditor`, which
+  asks for a whole page plan rather than a summary.
+  """
+  @spec complete_raw(String.t()) :: {:ok, String.t()} | {:error, term()}
+  def complete_raw(prompt) when is_binary(prompt), do: run(prompt)
+
+  defp run(prompt) do
     chain()
     |> Enum.reduce_while({:error, :no_provider}, fn provider, _acc ->
       cond do
-        not function_exported?(provider, :complete, 1) ->
-          Logger.warning("Summarizer #{inspect(provider)} is not loaded; skipping")
+        # ensure_loaded? rather than function_exported?/3: modules load lazily, so
+        # a provider that has simply not been touched yet would otherwise look
+        # missing.
+        not Code.ensure_loaded?(provider) ->
+          Logger.warning("Summarizer #{inspect(provider)} is not available; skipping")
           {:cont, {:error, :no_provider}}
 
         not provider.configured?() ->
@@ -103,14 +131,8 @@ defmodule Summarizer do
         true ->
           case provider.complete(prompt) do
             {:ok, response} ->
-              clean = to_ascii(response)
-
-              Logger.info(
-                "Summarized with #{provider.name()}: requested #{max_length}, " <>
-                  "original #{String.length(text)}, result #{String.length(clean)}"
-              )
-
-              {:halt, {:ok, clean}}
+              Logger.info("Answered by #{provider.name()}")
+              {:halt, {:ok, to_ascii(response)}}
 
             {:error, reason} ->
               Logger.warning("Summarizer #{provider.name()} failed: #{inspect(reason)}")

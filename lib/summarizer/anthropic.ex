@@ -40,9 +40,10 @@ defmodule Summarizer.Anthropic do
   @fallback_beta "server-side-fallback-2026-07-01"
   @default_model "claude-opus-5"
 
-  # Generous next to a 450-character summary, because thinking tokens count
-  # against this too; the response itself stays short.
-  @max_tokens 4096
+  # Thinking tokens count against this, and NewsEditor asks for a whole page
+  # plan rather than one summary, so leave real headroom. Unused capacity costs
+  # nothing.
+  @max_tokens 16_000
   @receive_timeout 120_000
 
   @system_prompt "You are a copy editor preparing wire stories for a news page. " <>

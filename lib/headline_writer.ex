@@ -37,6 +37,11 @@ defmodule HeadlineWriter do
   @body_top 147
   @body_rows 8
 
+  # A headline may run to two lines, as the originals do; the body starts below
+  # whatever it uses.
+  @headline_top 167
+  @headline_rows 2
+
   # C0 text spacing steps one character height per row.
   @line_pitch @text_height
 
@@ -203,15 +208,12 @@ defmodule HeadlineWriter do
       # Headline, centered by measured width rather than padded with spaces -
       # the font is proportional, so a character count would not center it.
       |> select_color(@color_gray)
-      |> then(fn b ->
-        line = headline_line(headline)
-        draw_text_abs(b, line, {headline_x(line) / 256, 167 / 256})
-      end)
+      |> draw_headline(headline)
       # Story, broken into lines here rather than left to the renderer: the
       # reference renderer breaks mid-word, and pre-breaking is also what lets
       # the generator check that its own output fits before uploading.
       |> select_color(@color_white)
-      |> draw_story(story)
+      |> draw_story(story, @body_top - (length(headline_lines(headline)) - 1) * @line_pitch)
       |> append_byte(@gr_word_wrap_off)
 
     buffer
@@ -262,13 +264,15 @@ defmodule HeadlineWriter do
     end)
   end
 
-  @doc "The headline trimmed to a single row of the body field."
-  @spec headline_line(String.t()) :: String.t()
-  def headline_line(headline) do
-    case NaplpsText.wrap(headline, @text_width, @body_width) do
-      [single] -> single
-      [first | _] -> ellipsize(first)
-      [] -> ""
+  @doc "The headline broken to at most #{@headline_rows} rows of the body field."
+  @spec headline_lines(String.t()) :: [String.t()]
+  def headline_lines(headline) do
+    lines = NaplpsText.wrap(headline, @text_width, @body_width)
+
+    if length(lines) <= @headline_rows do
+      lines
+    else
+      lines |> Enum.take(@headline_rows) |> List.update_at(-1, &ellipsize/1)
     end
   end
 
@@ -277,12 +281,22 @@ defmodule HeadlineWriter do
     @body_left + round((@body_width - NaplpsText.text_width(@text_width, text)) / 2)
   end
 
-  defp draw_story(buffer, story) do
+  # Each headline line is centered on its own, which is how the originals read.
+  defp draw_headline(buffer, headline) do
+    headline
+    |> headline_lines()
+    |> Enum.with_index()
+    |> Enum.reduce(buffer, fn {line, i}, acc ->
+      draw_text_abs(acc, line, {headline_x(line) / 256, (@headline_top - i * @line_pitch) / 256})
+    end)
+  end
+
+  defp draw_story(buffer, story, top) do
     story
     |> story_lines()
     |> Enum.with_index()
     |> Enum.reduce(buffer, fn {line, i}, acc ->
-      draw_text_abs(acc, line, {@body_left / 256, (@body_top - i * @line_pitch) / 256})
+      draw_text_abs(acc, line, {@body_left / 256, (top - i * @line_pitch) / 256})
     end)
   end
 
