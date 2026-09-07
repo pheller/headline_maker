@@ -18,10 +18,6 @@ defmodule HeadlineWriter do
   use NaplpsConstants
   import NaplpsWriter
 
-  @ollama_host "http://localhost:11434"
-  @ollama_post "/api/generate"
-  @model "llama3.1:8b"
-
   @number_of_pages 4
 
   @debug_delimiter "////////"
@@ -219,43 +215,6 @@ defmodule HeadlineWriter do
   end
 
   def summarize_text(text, max_length) when is_binary(text) do
-    escaped_text = String.replace(text, "\"", "\\\"")
-    # Logger.debug("Summarizing text #{escaped_text} to #{max_length} characters)")
-
-    prompt_text = "Summarize the text #{escaped_text} close to a maximum of #{max_length} characters, keeping as much of the original meaning as possible. Do not add ellipses or other indicators of truncation."
-
-    prompt_result = prompt(prompt_text)
-
-
-    case prompt_result do
-      {:ok, response} ->
-        Logger.debug("Requested length: #{max_length}, Original length: #{String.length(text)}, Prompt result length: #{String.length(response)}")
-
-      {:error, reason} ->
-        Logger.warning("Warning: #{inspect(reason)}")
-    end
-    prompt_result
-  end
-
-  def prompt(text) do
-    body = %{
-      model: @model,
-      prompt: text,
-      stream: false
-    }
-
-    host = System.get_env("OLLAMA_HOST") || @ollama_host
-    url = host <> @ollama_post
-
-    case Req.post(url, json: body, receive_timeout: 120_000) do
-      {:ok, %{status: 200, body: %{"response" => response}}} ->
-        {:ok, response}
-
-      {:ok, %{status: status, body: body}} ->
-        {:error, "HTTP #{status}: #{inspect(body)}"}
-
-      {:error, reason} ->
-        {:error, reason}
-    end
+    Summarizer.summarize(text, max_length)
   end
 end

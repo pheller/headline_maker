@@ -26,10 +26,11 @@ defmodule HeadlineMaker do
           retroguide: :string,
           debugoutput: :string,
           debuginput: :string,
-          attribution: :string
+          attribution: :string,
+          summarizer: :string
         ],
         # Deliberatly not using shortcuts for debug options
-        aliases: [i: :input, o: :output, d: :directory, h: :help, f: :feedstyle, r: :retroguide, a: :attribution]
+        aliases: [i: :input, o: :output, d: :directory, h: :help, f: :feedstyle, r: :retroguide, a: :attribution, s: :summarizer]
       )
 
     cond do
@@ -45,6 +46,12 @@ defmodule HeadlineMaker do
         debugoutput = opts[:debugoutput]
         debuginput = opts[:debuginput]
         attribution = opts[:attribution]
+
+        # Command line beats SUMMARIZER beats the default; setting it here
+        # keeps Summarizer's own lookup order intact when the flag is absent.
+        if opts[:summarizer] do
+          Application.put_env(:headline_maker, :summarizer, opts[:summarizer])
+        end
 
         feedstyle =
           case opts[:feedstyle] do
@@ -70,6 +77,8 @@ defmodule HeadlineMaker do
           "Input file: #{input}, Output files: #{output}, Directory: #{directory}, Feed Style: #{feedstyle}"
         )
 
+        IO.puts("Summarizer chain: #{Enum.map_join(Summarizer.chain(), ", ", & &1.name())}")
+
         HeadlineWriter.write_headlines(options)
 
    end
@@ -80,9 +89,14 @@ defmodule HeadlineMaker do
     Usage: headline_maker [options]
 
     Options:
-      -i, --input   Input file
-      -o, --output  Output file
-      -h, --help    Show this help message
+      -i, --input       Input file
+      -o, --output      Output file
+      -d, --directory   Output directory
+      -f, --feedstyle   Feed style module name
+      -r, --retroguide  Telnet guide string for RetroCampusFeed
+      -a, --attribution Attribution appended to each headline
+      -s, --summarizer  Summarizer chain, comma separated, tried in order
+      -h, --help        Show this help message
     """)
   end
 end
