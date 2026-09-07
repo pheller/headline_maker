@@ -39,9 +39,14 @@ defmodule NewsEditor do
 
   # Characters per row actually achieved by wrapped prose in the 250-unit body
   # field at char width 5 - measured, not the theoretical 61.
-  @chars_per_row 55
+  # Measured on real wrapped summaries in the 250-unit field at char width 5.
+  @chars_per_row 58
 
   @headline_rows 2
+
+  # The body field of the target layout: 250 units wide at char width 5.
+  @char_width 5
+  @field_width 250
   @label_chars 50
 
   @min_stories 5
@@ -62,12 +67,80 @@ defmodule NewsEditor do
   Returns `{:ok, stories}` where each story is a map with `:headline`, `:body`
   and `:substories`.
   """
-  @spec plan([[String.t()]]) :: {:ok, [map()]} | {:error, term()}
-  def plan(articles) when is_list(articles) do
-    case Summarizer.complete_raw(prompt(articles)) do
-      {:ok, text} -> parse(text)
-      {:error, reason} -> {:error, reason}
+  @spec plan([[String.t()]], keyword()) :: {:ok, [map()]} | {:error, term()}
+  def plan(articles, opts \\ []) when is_list(articles) do
+    attempts = Keyword.get(opts, :attempts, 2)
+
+    with {:ok, text} <- Summarizer.complete_raw(prompt(articles)),
+         {:ok, stories} <- parse(text) do
+      {:ok, Enum.map(stories, &tighten(&1, attempts))}
     end
+  end
+
+  # --- Fitting --------------------------------------------------------------
+
+  # The page is the authority on length, not the character count the prompt
+  # quotes. Measure what came back and, when a summary runs long, ask for it
+  # again with the overage stated. Re-asking beats trimming: the model can drop
+  # a whole clause where a trim would cut mid-sentence.
+  defp tighten(story, attempts) do
+    budget = Map.get(@body_rows, length(story.substories), 0)
+    story = %{story | body: fit_text(story.body, budget, attempts, "story summary")}
+
+    subs =
+      Enum.map(story.substories, fn sub ->
+        %{sub | body: fit_text(sub.body, @body_rows[0], attempts, "subordinate summary")}
+      end)
+
+    %{story | substories: subs}
+  end
+
+  defp fit_text(text, budget, attempts, what) do
+    actual = rows(text)
+
+    cond do
+      actual <= budget ->
+        text
+
+      attempts <= 0 ->
+        Logger.warning(
+          "#{what} still #{actual} lines against #{budget}; leaving it to the renderer"
+        )
+
+        text
+
+      true ->
+        Logger.info("#{what} is #{actual} lines against #{budget}; asking for it shorter")
+
+        case Summarizer.complete_raw(shorten_prompt(text, actual, budget)) do
+          {:ok, shorter} ->
+            fit_text(Summarizer.to_ascii(String.trim(shorter)), budget, attempts - 1, what)
+
+          {:error, reason} ->
+            Logger.warning("could not shorten #{what}: #{inspect(reason)}")
+            text
+        end
+    end
+  end
+
+  @doc "Lines this text occupies in the body field."
+  @spec rows(String.t()) :: non_neg_integer()
+  def rows(text), do: length(NaplpsText.wrap(text, @char_width, @field_width))
+
+  defp shorten_prompt(text, actual, budget) do
+    """
+    This news summary runs #{actual} lines on the page. It must fit #{budget}.
+
+    Rewrite it #{actual - budget} lines shorter - roughly
+    #{(actual - budget) * @chars_per_row} characters - keeping the most
+    important facts and the same plain wire-service voice. Drop whole clauses
+    or a whole sentence rather than trimming words everywhere. Do not end with
+    an ellipsis.
+
+    Reply with the rewritten summary only.
+
+    #{text}
+    """
   end
 
   @doc "The editorial prompt. Exposed so it can be read and reviewed on its own."
@@ -99,8 +172,12 @@ defmodule NewsEditor do
 
   defp voice do
     """
-    You are a copy editor in the PRODIGY news department, writing HEADLINE NEWS
-    for the service's 1990 subscribers.
+    You are a copy editor in the PRODIGY news department, writing HEADLINE NEWS.
+
+    You write in the house style of PRODIGY's 1990 newsroom. The stories
+    themselves are today's: report them as current news, and make no reference
+    to any era, anniversary or passage of time. The style is what comes from
+    1990, not the subject matter.
 
     Who you are writing for: adults who read a daily paper and follow the news.
     Most are college-educated professionals in two-income households, in and
@@ -114,6 +191,14 @@ defmodule NewsEditor do
     take sides. Report what happened and who said it. Attribute contested
     claims to whoever made them. No adjectives that argue, no scare quotes, no
     knowing asides, no hype, no predictions of your own.
+
+    You write to fit. The screen is small and fixed, and a newsroom that knows
+    its medium writes to the space rather than writing long and being cut. A
+    story told completely in fewer words is better work, not lesser.
+
+    Headlines and subordinate labels take Title Case, capitalizing the
+    principal words, as the service's own headlines do: "Bush Talks Tough in
+    Congressional Address". Summaries are ordinary sentences.
 
     Style: plain declarative sentences, active voice, concrete names, numbers
     and places. Wire-service neutral. Past tense for what happened, present for
@@ -145,7 +230,11 @@ defmodule NewsEditor do
        situation with distinct fronts, or a major event with real strands
        (what happened, the response, what it costs).
 
-       Most stories take NONE. A story with one thing to say gets no links.
+       A story with one thing to say gets no links, and that is the common
+       case. But a genuinely big story - the kind that would lead a broadcast -
+       may well carry three or four, and up to six are available. Give a story
+       as many as it truly has and no more.
+
        Never invent an angle to fill a slot, never split one idea into two, and
        never add a link you cannot write a real summary for from the copy you
        were given.
@@ -162,22 +251,29 @@ defmodule NewsEditor do
     rows =
       0..6
       |> Enum.map_join("\n", fn n ->
-        "      #{n} link#{if n == 1, do: " ", else: "s"}   #{String.pad_leading(to_string(body_budget(n)), 4)} characters" <>
-          if(n == 6, do: "   (headline and links only - no summary)", else: "")
+        rows = @body_rows[n]
+
+        "      #{n} link#{if n == 1, do: " ", else: "s"}   #{String.pad_leading(to_string(rows), 2)} lines  (about #{body_budget(n)} characters)" <>
+          if(n == 6, do: "   - headline and links only, no summary", else: "")
       end)
 
     """
-    LENGTHS - these are hard limits, not suggestions. Text that overruns is cut.
+    LENGTHS
 
-      Headline:            at most #{headline_budget()} characters (it wraps to two lines)
-      Subordinate label:   at most #{@label_chars} characters (one line)
+    The page is measured in LINES of about #{@chars_per_row} characters. What
+    matters is the number of lines the text fills, so leave yourself room -
+    text that overruns is cut, and a summary that lands two lines short reads
+    better than one that gets truncated.
+
+      Headline:            2 lines  (about #{headline_budget()} characters)
+      Subordinate label:   1 line   (at most #{@label_chars} characters)
 
       Story summary, by how many subordinate links the story carries:
 
     #{rows}
 
-    A subordinate story's own summary may run to #{body_budget(0)} characters.
-    Aim comfortably under each limit rather than right at it.
+    A subordinate story's own summary gets the full #{@body_rows[0]} lines
+    (about #{body_budget(0)} characters).
     """
   end
 
@@ -192,8 +288,13 @@ defmodule NewsEditor do
     ]}
 
     List the stories in rank order. Use an empty array for a story with no
-    subordinate coverage. Plain ASCII only: straight quotes, a hyphen for any
-    dash, no ellipsis character.
+    subordinate coverage.
+
+    Do NOT number the subordinate labels. The page draws its own numbered box
+    beside each one, so a label that begins "1." reads as "1. 1.".
+
+    Plain ASCII only: straight quotes, a hyphen for any dash, no ellipsis
+    character.
     """
   end
 
@@ -237,7 +338,11 @@ defmodule NewsEditor do
         |> List.wrap()
         |> Enum.map(fn sub ->
           %{
-            label: Summarizer.to_ascii(Map.get(sub, "label", "")),
+            label:
+              sub
+              |> Map.get("label", "")
+              |> Summarizer.to_ascii()
+              |> String.replace(~r/^\s*\d+\s*[.):]\s*/, ""),
             body: Summarizer.to_ascii(Map.get(sub, "body", ""))
           }
         end)
