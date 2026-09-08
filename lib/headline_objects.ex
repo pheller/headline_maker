@@ -22,6 +22,13 @@ defmodule HeadlineObjects do
   set of its own, and a standard menu binding each numbered field to one of
   those bodies.
 
+  ## The foot of every page
+
+  Any set of more than one element is walked by NEXT and BACK, so every page
+  in a set but its last trails the one that follows it. That is as true of a
+  story's subordinate pages as of the top stories, and would be true of any
+  deeper level - the rule is a property of the set, not of the level.
+
   ## How a subordinate link reaches its page
 
   Recovered objects (`NH00CF4JB` / `NH00CF4KB`) show the shape: the action
@@ -150,12 +157,17 @@ defmodule HeadlineObjects do
   end
 
   defp subordinate_objects(story, id) do
-    total = length(story.substories)
+    subs = story.substories
+    total = length(subs)
 
-    story.substories
+    subs
     |> Enum.with_index(1)
     |> Enum.map(fn {sub, j} ->
-      naplps = HeadlinePage.render(sub.label, sub.body, [], nil)
+      # A subordinate page announces its sibling exactly as a top story
+      # announces the next story. The label is already the short form written
+      # for the parent's numbered list, so it serves here unchanged.
+      next = subs |> Enum.at(j) |> then(&if(&1, do: &1.label))
+      naplps = HeadlinePage.render(sub.label, sub.body, [], next)
 
       segments = [
         PresentationData.new(:presentation_data_naplps, naplps),
