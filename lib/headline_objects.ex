@@ -160,10 +160,7 @@ defmodule HeadlineObjects do
     naplps = HeadlinePage.render(headline, body, labels, next_title)
 
     segments =
-      [
-        PresentationData.new(:presentation_data_naplps, naplps),
-        CustomText.new(1, 7, 0)
-      ] ++
+      [PresentationData.new(:presentation_data_naplps, naplps)] ++
         field_defs(length(labels)) ++
         [menu(next_id, labels, first_sub_id), dispatcher()]
 
@@ -210,7 +207,12 @@ defmodule HeadlineObjects do
     StandardMenu.new(:pc_event_initializer,
       mode: 3,
       next_page: next_page,
-      actions: actions
+      actions: actions,
+      # P5 exactly as the recovered NH00CF4JB carries it: an init cursor and a
+      # terminator, no per-field entries. Per-field display attributes are our
+      # invention, and they repaint the selection boxes over the art the
+      # presentation data already drew.
+      display_attrs: <<0x01, 0x00, 0x02, 0x00, 0x00>>
     )
   end
 
@@ -253,7 +255,11 @@ defmodule HeadlineObjects do
         {x, y},
         {w, h},
         f.name,
-        1
+        # text_id 0: no custom text. Every recovered field uses 0 and none of
+        # the recovered objects carry a custom text segment - the one in the
+        # traced body is the tracing's own addition, and its white-on-black
+        # repainted over the grey selection boxes the NAPLPS already draws.
+        0
       )
     end)
   end
