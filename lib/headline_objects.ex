@@ -142,8 +142,15 @@ defmodule HeadlineObjects do
 
     menu =
       case sub_id do
-        nil -> []
-        id -> [menu_for(id, length(labels))]
+        nil ->
+          []
+
+        id ->
+          # Two calls, as the recovered NH00CF4JB carries: XXOPSM00 on the
+          # initializer sets the menu up, XXOPSM01 on the post-processor
+          # dispatches a click. With only the first, nothing is listening when
+          # a field is pressed - which is what staging showed.
+          [menu_for(id, length(labels)), dispatcher()]
       end
 
     segments =
@@ -217,6 +224,20 @@ defmodule HeadlineObjects do
     # (0x02), not the post-processor. Assumed otherwise until the bytes were
     # compared.
     StandardMenu.new(:pc_event_initializer, mode: 3, actions: actions)
+  end
+
+  # The post-processor half of the standard menu. It takes no parameters, and
+  # carries NO parameter area - nil rather than [], since an empty area would
+  # make the segment two bytes longer than the recovered call.
+  defp dispatcher do
+    ProgramCall.new(
+      :pc_event_post_processor,
+      :pc_prefix_program_call,
+      "XXOPSM01",
+      "PGM",
+      <<>>,
+      nil
+    )
   end
 
   # Header.new/4 puts the SEGMENT count in the set-size byte, which is only
