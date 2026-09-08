@@ -272,6 +272,7 @@ defmodule NewsEditor do
 
       Headline:            2 lines  (about #{headline_budget()} characters)
       Short title:         at most #{@short_title_chars} characters
+      Highlight title:     3 lines of at most 17 characters (lead story only)
       Subordinate label:   1 line   (at most #{@label_chars} characters)
 
       Story summary, by how many subordinate links the story carries:
@@ -290,9 +291,16 @@ defmodule NewsEditor do
     Reply with JSON only - no fences, no commentary. Shape:
 
     {"stories":[
-      {"headline":"...","short_title":"...","body":"...",
+      {"headline":"...","short_title":"...","highlight_title":"...","body":"...",
        "substories":[{"label":"...","body":"..."}]}
     ]}
+
+    "highlight_title" is needed ONLY on the first story. It announces the lead
+    on the HIGHLIGHTS landing page, in a box three lines tall and seventeen
+    fixed-width characters wide. Give it as up to three newline-separated
+    lines, each at most 17 characters, broken where a sub-editor would break
+    it. "Hostage Execution\\nDelayed\\nIndefinitely". Omit it on every other
+    story.
 
     "short_title" is how the story is announced at the foot of the PREVIOUS
     page, beside a [NEXT] marker. It is not a shortened headline: write a
@@ -347,6 +355,10 @@ defmodule NewsEditor do
       short_title:
         story
         |> Map.get("short_title", "")
+        |> Summarizer.to_ascii(),
+      highlight_title:
+        story
+        |> Map.get("highlight_title", "")
         |> Summarizer.to_ascii(),
       body: Summarizer.to_ascii(Map.get(story, "body", "")),
       substories:

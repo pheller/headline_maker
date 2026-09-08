@@ -110,6 +110,10 @@ defmodule HeadlineMaker do
 
       true ->
         case NewsEditor.plan(articles) do
+          {:ok, []} ->
+            Logger.error("The editor returned no stories; nothing written")
+            exit({:shutdown, 1})
+
           {:ok, stories} ->
             write_objects(stories, options)
 
@@ -138,11 +142,17 @@ defmodule HeadlineMaker do
     end)
   end
 
-  defp write_objects(stories, options) do
+  # Public only so the integration test can drive the whole emit step without
+  # a feed or a model behind it.
+  @doc false
+  def write_objects(stories, options) do
     dir = options[:directory]
     File.mkdir_p!(dir)
 
-    objects = HeadlineObjects.build(stories)
+    # The landing page announces the lead story, so it belongs in the same
+    # upload set as the headline chain - the two can then never disagree
+    # about what today's top story is.
+    objects = HeadlineObjects.build(stories) ++ [HighlightsBody.build(hd(stories))]
 
     for {name, bytes} <- objects do
       path = Path.join(dir, name)
