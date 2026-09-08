@@ -23,4 +23,8 @@ COPY mix.exs mix.lock ./
 COPY config config
 RUN mix deps.get --only prod
 COPY lib lib
+# priv/ holds the recovered TLOTA000B object and its Telidraw source, which
+# HighlightsBody reads at COMPILE time - so it has to be in the context before
+# `mix compile`, not merely present in the release.
+COPY priv priv
 RUN mix deps.compile && mix compile && mix release --overwrite
