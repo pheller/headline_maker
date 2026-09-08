@@ -213,7 +213,10 @@ defmodule HeadlineObjects do
           StandardMenu.destination(@destination_prefix <> body)
       end
 
-    StandardMenu.new(:pc_event_post_processor, mode: 3, actions: actions)
+    # The recovered NH00CF4JB calls the standard menu on the INITIALIZER event
+    # (0x02), not the post-processor. Assumed otherwise until the bytes were
+    # compared.
+    StandardMenu.new(:pc_event_initializer, mode: 3, actions: actions)
   end
 
   # Header.new/4 puts the SEGMENT count in the set-size byte, which is only
