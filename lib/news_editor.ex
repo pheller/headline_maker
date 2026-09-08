@@ -54,8 +54,8 @@ defmodule NewsEditor do
   @field_width 250
   @label_chars 50
 
-  @min_stories 5
-  @max_stories 7
+  @min_stories 6
+  @max_stories 10
 
   @doc "Characters of body text available to a story carrying `n` links."
   @spec body_budget(non_neg_integer()) :: non_neg_integer()

@@ -101,7 +101,7 @@ defmodule HeadlineMaker do
   # object it takes. Returns non-zero on failure so the caller uploads nothing:
   # yesterday's headlines are better than a broken tree.
   defp run(options) do
-    articles = options[:feedstyle].get_stories(options, options[:stories])
+    articles = gather(options)
 
     cond do
       articles == [] ->
@@ -118,6 +118,24 @@ defmodule HeadlineMaker do
             exit({:shutdown, 1})
         end
     end
+  end
+
+  # A day's wire copy, from every feed named in --input.
+  #
+  # The feed modules each take one URL, so several are fetched and merged here
+  # rather than teaching any one of them about lists. This matters for what
+  # gets picked: Fox Council splits its coverage by category, so pulling only
+  # `us.json` means the editor never sees a world story it could rank, however
+  # much the prompt prefers international news.
+  defp gather(options) do
+    feeds = options[:input] |> String.split(",", trim: true) |> Enum.map(&String.trim/1)
+    per_feed = max(div(options[:stories], max(length(feeds), 1)), 3)
+
+    Enum.flat_map(feeds, fn url ->
+      articles = options[:feedstyle].get_stories(%{options | input: url}, per_feed)
+      Logger.info("#{length(articles)} articles from #{url}")
+      articles
+    end)
   end
 
   defp write_objects(stories, options) do
