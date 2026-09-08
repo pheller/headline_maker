@@ -28,19 +28,36 @@ defmodule HighlightsBodyTest do
   end
 
   describe "retargeting" do
-    test "moves only the two destinations that change" do
+    test "moves only the destinations that change" do
       obj = HighlightsBody.patch(["a", "b", "c"])
 
       # Option 1 still reaches HEADLINE NEWS.
       assert String.contains?(obj, "NH000000PG ")
-      # Options 2 and 3 are retargeted.
-      assert String.contains?(obj, "ZZAB0000PG ")
+
+      # Options 2, 3, 4 and 5 are retargeted.
+      for name <- ~w(ZZAB0000PG 3C00SRCHPG GCC00000PG) do
+        assert String.contains?(obj, name <> " ")
+      end
+
       assert String.contains?(obj, "ZZPR0000P  ")
-      refute String.contains?(obj, "5C000000PG ")
-      refute String.contains?(obj, "FN000000PG ")
-      # The six untouched destinations survive.
-      for name <- ~w(SJ000000PG AT000000PG ID000000PG XS000000PG IHB00000PG IHC00000PG) do
+
+      # None of the originals they replaced remain. SJ000000PG and AT000000PG
+      # never had objects behind them at all - they were placeholders from the
+      # first exhibit build.
+      for name <- ~w(5C000000PG FN000000PG SJ000000PG AT000000PG) do
+        refute String.contains?(obj, name <> " ")
+      end
+
+      # The four untouched destinations survive.
+      for name <- ~w(ID000000PG XS000000PG IHB00000PG IHC00000PG) do
         assert String.contains?(obj, name)
+      end
+    end
+
+    test "every retarget is length preserving" do
+      for {from, to} <- HighlightsBody.retarget_map() do
+        assert byte_size(from) == 11, "#{inspect(from)} is not 11 bytes"
+        assert byte_size(to) == 11, "#{inspect(to)} is not 11 bytes"
       end
     end
 

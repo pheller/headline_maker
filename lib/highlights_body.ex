@@ -41,6 +41,11 @@ defmodule HighlightsBody do
 
       5C000000PG -> ZZAB0000PG   option 2, now Welcome / short history
       FN000000PG -> ZZPR0000P    option 3, the Prodigy Reloaded featurette
+      SJ000000PG -> 3C00SRCHPG   option 4, the Software Guide
+      AT000000PG -> GCC00000PG   option 5, the Computer Club bulletin board
+
+  Options 4 and 5 were placeholder ideas from the first exhibit build and had
+  no objects behind them at all. They now reach real content.
 
   Option 1 keeps the original's `NH000000PG`, which is also where the
   HEADLINES keyword lands.
@@ -69,14 +74,38 @@ defmodule HighlightsBody do
   # The five text slots, in the order the NAPLPS draws them. Option 3 is the
   # promo panel on the right and carries no text of its own.
   @slot2 ["Welcome and a", "Short History of", "Prodigy"]
-  @slot4 "Dosbox and emulating Prodigy / DOS"
-  @slot5 "Modem emulation for vintage PCs"
+  @slot4 "Home-Office Computing Software Guide"
+  @slot5 "Talk Tech in the Computer Club"
   @slot6 "Credit where credit is due"
+
+  # Slots 4, 5 and 6 start at x=35 on a 256-wide screen in the same 6x10 cell,
+  # so 221/6 = 36 characters. The original's own longest entry ("North to
+  # Alaska and South to Atlanta") is exactly 36, which is what proves the limit
+  # rather than merely implying it.
+  @wide_slot_cols 36
 
   @retarget [
     {"5C000000PG ", "ZZAB0000PG "},
-    {"FN000000PG ", "ZZPR0000P  "}
+    {"FN000000PG ", "ZZPR0000P  "},
+    {"SJ000000PG ", "3C00SRCHPG "},
+    {"AT000000PG ", "GCC00000PG "}
   ]
+
+  for {slot, text} <- [slot4: @slot4, slot5: @slot5, slot6: @slot6],
+      String.length(text) > @wide_slot_cols do
+    raise CompileError,
+      description:
+        "#{slot} is #{String.length(text)} characters; the row holds #{@wide_slot_cols}"
+  end
+
+  @doc """
+  The destination substitutions, as `{from, to}` pairs.
+
+  Every name is 11 characters on both sides, which is what lets them be
+  swapped in place with no segment reframing.
+  """
+  @spec retarget_map() :: [{binary(), binary()}]
+  def retarget_map, do: @retarget
 
   @doc """
   Build the HIGHLIGHTS body announcing `lead`.
