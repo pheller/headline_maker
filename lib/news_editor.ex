@@ -44,6 +44,11 @@ defmodule NewsEditor do
 
   @headline_rows 2
 
+  # The foot of each page announces the next story. It shares a line with the
+  # [NEXT] marker, so it has to be far shorter than a headline - the originals
+  # run to about thirty characters ("Exxon Pulls Valdez Cleanup Crew").
+  @short_title_chars 35
+
   # The body field of the target layout: 250 units wide at char width 5.
   @char_width 5
   @field_width 250
@@ -266,6 +271,7 @@ defmodule NewsEditor do
     better than one that gets truncated.
 
       Headline:            2 lines  (about #{headline_budget()} characters)
+      Short title:         at most #{@short_title_chars} characters
       Subordinate label:   1 line   (at most #{@label_chars} characters)
 
       Story summary, by how many subordinate links the story carries:
@@ -284,8 +290,15 @@ defmodule NewsEditor do
     Reply with JSON only - no fences, no commentary. Shape:
 
     {"stories":[
-      {"headline":"...","body":"...","substories":[{"label":"...","body":"..."}]}
+      {"headline":"...","short_title":"...","body":"...",
+       "substories":[{"label":"...","body":"..."}]}
     ]}
+
+    "short_title" is how the story is announced at the foot of the PREVIOUS
+    page, beside a [NEXT] marker. It is not a shortened headline: write a
+    complete, self-contained phrase naming the story, the way a newspaper
+    teases the next item. "Exxon Pulls Valdez Cleanup Crew", not "Exxon Pulls
+    Valdez Cleanup Crew After Federal".
 
     List the stories in rank order. Use an empty array for a story with no
     subordinate coverage.
@@ -331,6 +344,10 @@ defmodule NewsEditor do
   defp normalize(story) do
     %{
       headline: Summarizer.to_ascii(Map.get(story, "headline", "")),
+      short_title:
+        story
+        |> Map.get("short_title", "")
+        |> Summarizer.to_ascii(),
       body: Summarizer.to_ascii(Map.get(story, "body", "")),
       substories:
         story

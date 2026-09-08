@@ -61,7 +61,10 @@ defmodule HeadlineObjects do
       stories
       |> Enum.with_index(1)
       |> Enum.map(fn {story, i} ->
-        top_object(story, i, total, Map.get(ids, i))
+        # The foot of each page trails the story the reader reaches with NEXT,
+        # so every page but the last needs its successor's title.
+        next = stories |> Enum.at(i) |> next_title()
+        top_object(story, i, total, Map.get(ids, i), next)
       end)
 
     subs =
@@ -113,9 +116,20 @@ defmodule HeadlineObjects do
 
   # --- Objects --------------------------------------------------------------
 
-  defp top_object(story, sequence, total, sub_id) do
+  # The short form a story is announced by on the previous page. The editor
+  # supplies one; falling back to the headline keeps older plans working, at
+  # the cost of a trim.
+  defp next_title(nil), do: nil
+
+  defp next_title(story) do
+    case Map.get(story, :short_title) do
+      t when is_binary(t) and t != "" -> t
+      _ -> story.headline
+    end
+  end
+
+  defp top_object(story, sequence, total, sub_id, next) do
     labels = Enum.map(story.substories, & &1.label)
-    next = nil
 
     naplps = HeadlinePage.render(story.headline, story.body, labels, next)
 
