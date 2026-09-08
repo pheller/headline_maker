@@ -17,32 +17,33 @@ defmodule HeadlineObjects do
   @moduledoc """
   Turns a day's plan into the Page Element Objects the service serves.
 
-  The top stories are one element set - sequence 1..N of set size N - so
-  NEXT and BACK walk them. A story that carries subordinate coverage gets a
-  set of its own, and a standard menu binding each numbered field to one of
-  those bodies.
+  ## One object per page
 
-  ## The foot of every page
+  Every recovered HEADLINE NEWS body is `sequence 1` of `set_size 1` with its
+  own id - NH00A3XY, NH00CF4J, NH00CF4K - so the service did not page through
+  element sets here. Each screen is its own object, and the base-36 id is a
+  page counter: CF4J and CF4K are adjacent because they were allocated one
+  after the other.
 
-  Any set of more than one element is walked by NEXT and BACK, so every page
-  in a set but its last trails the one that follows it. That is as true of a
-  story's subordinate pages as of the top stories, and would be true of any
-  deeper level - the rule is a property of the set, not of the level.
+  ## NEXT chains through the menu, not through a set
+
+  A body's standard menu carries the next page in its third parameter. That is
+  the whole reason NH00CF4JB has a menu at all - its choice and action lists
+  are empty, and P3 names CF4K. So every page gets a menu, whether or not it
+  has numbered links, and the last page of a chain simply has nothing in P3.
 
   ## How a subordinate link reaches its page
 
-  Recovered objects (`NH00CF4JB` / `NH00CF4KB`) show the shape: the action
-  navigates to the SHARED page template and passes the body to display as a
-  destination parameter. One template serves every screen, told each time
-  which element to show, so no page template is generated here.
+  An action navigates to the SHARED page template and passes the body to
+  display as a destination parameter. One template serves every screen, told
+  each time which element to show, so no page template is generated here.
 
   ## Object ids
 
-  Digit-leading ids are structural - `NH000000` the page template, `NH000251`
-  the header - and letter-leading ids are content on a base-36 counter.
-  `A000` is the conventional first content id, and it is what the recovered
-  page template already points at, so the top stories keep it. Subordinate
-  sets take the ids after it: `A001`, `A002`, and so on.
+  Digit-leading ids are structural - NH000000 the page template, NH000251 the
+  header - and letter-leading ids are content. A000 is the conventional first
+  content id and is what the recovered page template already points at, so the
+  first story keeps it; every page after that takes the next id in turn.
   """
 
   @legend "NH00"
@@ -61,47 +62,77 @@ defmodule HeadlineObjects do
   """
   @spec build([map()]) :: [{String.t(), binary()}]
   def build(stories) do
-    total = length(stories)
-    ids = subordinate_ids(stories)
+    plan = allocate(stories)
 
     tops =
-      stories
-      |> Enum.with_index(1)
-      |> Enum.map(fn {story, i} ->
-        # The foot of each page trails the story the reader reaches with NEXT,
-        # so every page but the last needs its successor's title.
-        next = stories |> Enum.at(i) |> next_title()
-        top_object(story, i, total, Map.get(ids, i), next)
+      plan
+      |> Enum.map(fn %{id: id, story: story, subs: subs, next: next, next_title: next_title} ->
+        page(
+          id,
+          story.headline,
+          story.body,
+          Enum.map(subs, & &1.sub.label),
+          next,
+          first_sub_id(subs),
+          next_title
+        )
       end)
 
     subs =
-      stories
-      |> Enum.with_index(1)
-      |> Enum.flat_map(fn {story, i} ->
-        case Map.get(ids, i) do
-          nil -> []
-          id -> subordinate_objects(story, id)
-        end
+      Enum.flat_map(plan, fn %{subs: subs} ->
+        Enum.map(subs, fn %{id: id, sub: sub, next: next, next_label: nt} ->
+          page(id, sub.label, sub.body, [], next, nil, nt)
+        end)
       end)
 
     tops ++ subs
   end
 
   @doc """
-  Content ids for the stories that carry subordinate coverage, keyed by the
-  story's position. Allocated in order from the id after `A000`, so they can
-  collide neither with the top set nor with each other.
+  Assign a page id to every screen and work out what each one's NEXT is.
+
+  Top stories are allocated first, so they keep the contiguous run beginning at
+  `A000`; each story's subordinate pages follow. Within a group, every page
+  points at the next and the last points at nothing.
   """
-  @spec subordinate_ids([map()]) :: %{pos_integer() => String.t()}
-  def subordinate_ids(stories) do
-    stories
-    |> Enum.with_index(1)
-    |> Enum.filter(fn {story, _i} -> story.substories != [] end)
-    |> Enum.map_reduce(next_id(@top_id), fn {_story, i}, id ->
-      {{i, id}, next_id(id)}
-    end)
-    |> elem(0)
-    |> Map.new()
+  @spec allocate([map()]) :: [map()]
+  def allocate(stories) do
+    {tops, next_free} =
+      Enum.map_reduce(stories, @top_id, fn story, id -> {{id, story}, next_id(id)} end)
+
+    {plan, _} =
+      Enum.map_reduce(Enum.with_index(tops), next_free, fn {{id, story}, i}, free ->
+        {sub_ids, free} =
+          Enum.map_reduce(story.substories, free, fn sub, f -> {{f, sub}, next_id(f)} end)
+
+        subs =
+          sub_ids
+          |> Enum.with_index()
+          |> Enum.map(fn {{sid, sub}, j} ->
+            following = Enum.at(sub_ids, j + 1)
+
+            %{
+              id: sid,
+              sub: sub,
+              next: following && elem(following, 0),
+              next_label: following && elem(following, 1).label
+            }
+          end)
+
+        following_top = Enum.at(tops, i + 1)
+
+        {%{
+           id: id,
+           story: story,
+           subs: subs,
+           next: following_top && elem(following_top, 0),
+           # The foot of a page announces the page NEXT reaches, so this is the
+           # FOLLOWING story's short form, not this story's.
+           next_title: following_top && next_title(elem(following_top, 1))
+         }, free}
+      end)
+
+    plan
   end
 
   @doc """
@@ -123,10 +154,21 @@ defmodule HeadlineObjects do
 
   # --- Objects --------------------------------------------------------------
 
-  # The short form a story is announced by on the previous page. The editor
-  # supplies one; falling back to the headline keeps older plans working, at
-  # the cost of a trim.
-  defp next_title(nil), do: nil
+  # Every page is sequence 1 of set size 1 with its own id; NEXT is carried by
+  # the menu rather than by set membership.
+  defp page(id, headline, body, labels, next_id, first_sub_id, next_title) do
+    naplps = HeadlinePage.render(headline, body, labels, next_title)
+
+    segments =
+      [
+        PresentationData.new(:presentation_data_naplps, naplps),
+        CustomText.new(1, 7, 0)
+      ] ++
+        field_defs(length(labels)) ++
+        [menu(next_id, labels, first_sub_id), dispatcher()]
+
+    {"#{@legend}#{id}.B_1_8_1", encode(@legend <> id, 1, 1, segments)}
+  end
 
   defp next_title(story) do
     case Map.get(story, :short_title) do
@@ -135,54 +177,61 @@ defmodule HeadlineObjects do
     end
   end
 
-  defp top_object(story, sequence, total, sub_id, next) do
-    labels = Enum.map(story.substories, & &1.label)
+  # P3 names the page NEXT reaches; P4/P5/P6 carry the numbered links, which a
+  # page without subordinate coverage simply leaves empty - exactly the shape
+  # NH00CF4JB has, where the menu exists only to declare its successor.
+  defp menu(next_id, labels, first_sub_id) do
+    next_page =
+      if next_id do
+        StandardMenu.objid(@page_template, 1, 0x04) <>
+          StandardMenu.destination(
+            @destination_prefix <> StandardMenu.objid("#{@legend}#{next_id}B", 1, 0x08)
+          )
+      end
 
-    naplps = HeadlinePage.render(story.headline, story.body, labels, next)
-
-    menu =
-      case sub_id do
+    actions =
+      case first_sub_id do
         nil ->
           []
 
-        id ->
-          # Two calls, as the recovered NH00CF4JB carries: XXOPSM00 on the
-          # initializer sets the menu up, XXOPSM01 on the post-processor
-          # dispatches a click. With only the first, nothing is listening when
-          # a field is pressed - which is what staging showed.
-          [menu_for(id, length(labels)), dispatcher()]
+        first ->
+          labels
+          |> Enum.with_index()
+          |> Enum.map(fn {_label, i} ->
+            body = sub_id_at(first, i)
+
+            StandardMenu.objid(@page_template, 1, 0x04) <>
+              StandardMenu.destination(
+                @destination_prefix <> StandardMenu.objid("#{@legend}#{body}B", 1, 0x08)
+              )
+          end)
       end
 
-    segments =
-      [
-        PresentationData.new(:presentation_data_naplps, naplps),
-        CustomText.new(1, 7, 0)
-      ] ++ field_defs(length(labels)) ++ menu
-
-    {"#{@legend}#{@top_id}.B_#{sequence}_8_1",
-     encode(@legend <> @top_id, sequence, total, segments)}
+    StandardMenu.new(:pc_event_initializer,
+      mode: 3,
+      next_page: next_page,
+      actions: actions
+    )
   end
 
-  defp subordinate_objects(story, id) do
-    subs = story.substories
-    total = length(subs)
+  defp first_sub_id([]), do: nil
+  defp first_sub_id([%{id: id} | _]), do: id
 
-    subs
-    |> Enum.with_index(1)
-    |> Enum.map(fn {sub, j} ->
-      # A subordinate page announces its sibling exactly as a top story
-      # announces the next story. The label is already the short form written
-      # for the parent's numbered list, so it serves here unchanged.
-      next = subs |> Enum.at(j) |> then(&if(&1, do: &1.label))
-      naplps = HeadlinePage.render(sub.label, sub.body, [], next)
+  defp sub_id_at(first, 0), do: first
+  defp sub_id_at(first, n), do: sub_id_at(next_id(first), n - 1)
 
-      segments = [
-        PresentationData.new(:presentation_data_naplps, naplps),
-        CustomText.new(1, 7, 0)
-      ]
-
-      {"#{@legend}#{id}.B_#{j}_8_1", encode(@legend <> id, j, total, segments)}
-    end)
+  # The post-processor half. It takes no parameters and carries NO parameter
+  # area - nil rather than [], since an empty area would make the segment two
+  # bytes longer than the recovered call.
+  defp dispatcher do
+    ProgramCall.new(
+      :pc_event_post_processor,
+      :pc_prefix_program_call,
+      "XXOPSM01",
+      "PGM",
+      <<>>,
+      nil
+    )
   end
 
   # One numbered, selectable box per link, from the page's own geometry.
@@ -207,37 +256,6 @@ defmodule HeadlineObjects do
         1
       )
     end)
-  end
-
-  # Every link navigates to the shared page template, carrying the body it
-  # wants displayed.
-  defp menu_for(sub_id, count) do
-    actions =
-      for j <- 1..count do
-        body = StandardMenu.objid("#{@legend}#{sub_id}B", j, 0x08)
-
-        StandardMenu.objid(@page_template, 1, 0x04) <>
-          StandardMenu.destination(@destination_prefix <> body)
-      end
-
-    # The recovered NH00CF4JB calls the standard menu on the INITIALIZER event
-    # (0x02), not the post-processor. Assumed otherwise until the bytes were
-    # compared.
-    StandardMenu.new(:pc_event_initializer, mode: 3, actions: actions)
-  end
-
-  # The post-processor half of the standard menu. It takes no parameters, and
-  # carries NO parameter area - nil rather than [], since an empty area would
-  # make the segment two bytes longer than the recovered call.
-  defp dispatcher do
-    ProgramCall.new(
-      :pc_event_post_processor,
-      :pc_prefix_program_call,
-      "XXOPSM01",
-      "PGM",
-      <<>>,
-      nil
-    )
   end
 
   # Header.new/4 puts the SEGMENT count in the set-size byte, which is only
