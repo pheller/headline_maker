@@ -1,11 +1,26 @@
-FROM elixir:1.17.3-otp-27-slim
+# syntax=docker/dockerfile:1
+# Build stage for the content-batch image: a self-contained mix release of the
+# headline generator.
+#
+# This image is not meant to run on its own - content-batch assembles it:
+#   COPY --from=<this> /app/_build/prod/rel/headline_maker ...
+#
+# Unlike weather_overlay there are no native dependencies, so the release is
+# the whole story. It does need network at build time: naplps_writer and
+# prodigy_objects are git deps.
 
-RUN apt-get update && apt-get install -y build-essential git bash
-RUN mkdir -p /src/app
+FROM elixir:1.17.3-otp-27 AS build
 
-WORKDIR /src/app
-RUN git clone https://github.com/rrcook/headline_maker.git
-WORKDIR /src/app/headline_maker
-RUN mix deps.get && mix compile
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends git ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
 
-ENTRYPOINT ["mix", "run", "-e", "HeadlineMaker.main([\"-i\", \"bbs.retrocampus.com\", \"-f\", \"RetroCampusFeed\", \"-r\", \"511-1234\", \"-d\", \"./output\"])"]
+WORKDIR /app
+ENV MIX_ENV=prod
+
+RUN mix local.hex --force && mix local.rebar --force
+COPY mix.exs mix.lock ./
+COPY config config
+RUN mix deps.get --only prod
+COPY lib lib
+RUN mix deps.compile && mix compile && mix release --overwrite

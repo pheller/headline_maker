@@ -1,4 +1,6 @@
 defmodule HeadlineMaker do
+  require Logger
+
   # Copyright 2025, Ralph Richard Cook
   #
   # This file is part of Prodigy Reloaded.
@@ -27,10 +29,20 @@ defmodule HeadlineMaker do
           debugoutput: :string,
           debuginput: :string,
           attribution: :string,
-          summarizer: :string
+          summarizer: :string,
+          stories: :integer
         ],
         # Deliberatly not using shortcuts for debug options
-        aliases: [i: :input, o: :output, d: :directory, h: :help, f: :feedstyle, r: :retroguide, a: :attribution, s: :summarizer]
+        aliases: [
+          i: :input,
+          o: :output,
+          d: :directory,
+          h: :help,
+          f: :feedstyle,
+          r: :retroguide,
+          a: :attribution,
+          s: :summarizer
+        ]
       )
 
     cond do
@@ -41,6 +53,7 @@ defmodule HeadlineMaker do
       true ->
         input = opts[:input] || "https://memeorandum.com/feed.xml"
         output = opts[:output] || "NH00A000.BDY"
+        stories = opts[:stories] || 10
         directory = opts[:directory] || "."
         retroguide = opts[:retroguide] || "511-1234"
         debugoutput = opts[:debugoutput]
@@ -70,7 +83,8 @@ defmodule HeadlineMaker do
           retroguide: retroguide,
           debugoutput: debugoutput,
           debuginput: debuginput,
-          attribution: attribution
+          attribution: attribution,
+          stories: stories
         }
 
         IO.puts(
@@ -79,9 +93,63 @@ defmodule HeadlineMaker do
 
         IO.puts("Summarizer chain: #{Enum.map_join(Summarizer.chain(), ", ", & &1.name())}")
 
-        HeadlineWriter.write_headlines(options)
+        run(options)
+    end
+  end
 
-   end
+  # Fetch the wire copy, put a day's HEADLINE NEWS together, and write every
+  # object it takes. Returns non-zero on failure so the caller uploads nothing:
+  # yesterday's headlines are better than a broken tree.
+  defp run(options) do
+    articles = options[:feedstyle].get_stories(options, options[:stories])
+
+    cond do
+      articles == [] ->
+        Logger.error("No articles from #{options[:input]}; nothing written")
+        exit({:shutdown, 1})
+
+      true ->
+        case NewsEditor.plan(articles) do
+          {:ok, stories} ->
+            write_objects(stories, options)
+
+          {:error, reason} ->
+            Logger.error("Could not plan today's headlines: #{inspect(reason)}")
+            exit({:shutdown, 1})
+        end
+    end
+  end
+
+  defp write_objects(stories, options) do
+    dir = options[:directory]
+    File.mkdir_p!(dir)
+
+    objects = HeadlineObjects.build(stories)
+
+    for {name, bytes} <- objects do
+      path = Path.join(dir, name)
+      File.write!(path, bytes)
+      Logger.info("Wrote #{path}, #{byte_size(bytes)} bytes")
+    end
+
+    if options[:debugoutput], do: write_debug(stories, options[:debugoutput])
+
+    subs = Enum.sum(Enum.map(stories, &length(&1.substories)))
+    IO.puts("#{length(objects)} objects: #{length(stories)} stories, #{subs} subordinate pages")
+  end
+
+  # The copy as text, for reading without a renderer.
+  defp write_debug(stories, dir) do
+    File.mkdir_p!(dir)
+
+    for {s, i} <- Enum.with_index(stories, 1) do
+      subs = Enum.map_join(s.substories, "\n", fn sub -> "- #{sub.label}\n#{sub.body}" end)
+
+      File.write!(
+        Path.join(dir, "hmdebug_#{i}"),
+        "#{s.headline}#{HeadlineWriter.debug_delimiter()}#{s.body}\n\n#{subs}"
+      )
+    end
   end
 
   defp print_help do
