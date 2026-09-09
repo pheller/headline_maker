@@ -68,11 +68,33 @@ defmodule HeadlinePage do
 
   @max_links 6
 
-  @doc "Rows of story text available with `n` subordinate links."
+  # The headline is drawn from @body_top downward and the story starts below
+  # it, so the headline's rows come out of the same space the link block grows
+  # into. Budgeting from @body_top without reserving them overstates every
+  # story by the headline's height - which is how a four-link page came to
+  # draw its last two rows on top of the rule and the first link.
+  @headline_rows 2
+
+  @doc """
+  Rows of story text available with `n` subordinate links.
+
+  Reserves #{@headline_rows} rows for the headline, which is what the editorial
+  prompt promises it. `body_rows/2` takes the headline's actual height instead,
+  for the renderer, so a headline that fits on one line gives its spare row
+  back to the story.
+  """
   @spec body_rows(non_neg_integer()) :: non_neg_integer()
-  def body_rows(n) when n in 0..@max_links do
-    div(@body_top - top_rule(n) - @body_clearance, @body_pitch) |> max(0)
+  def body_rows(n), do: body_rows(n, @headline_rows)
+
+  @spec body_rows(non_neg_integer(), non_neg_integer()) :: non_neg_integer()
+  def body_rows(n, head_rows) when n in 0..@max_links do
+    div(@body_top - head_rows * @body_pitch - top_rule(n) - @body_clearance, @body_pitch)
+    |> max(0)
   end
+
+  @doc "Rows the headline is budgeted, and the top it is drawn from."
+  @spec headline_rows() :: non_neg_integer()
+  def headline_rows, do: @headline_rows
 
   @doc "Y of the rule above the link block; `nil` when there are no links."
   @spec top_rule(non_neg_integer()) :: pos_integer() | nil
@@ -130,8 +152,8 @@ defmodule HeadlinePage do
   end
 
   defp story(buffer, headline, body, n) do
-    rows = body_rows(n)
-    head_lines = wrap(headline, @body_font, @body_width) |> Enum.take(2)
+    head_lines = wrap(headline, @body_font, @body_width) |> Enum.take(@headline_rows)
+    rows = body_rows(n, length(head_lines))
     body_lines = wrap(body, @body_font, @body_width) |> Enum.take(rows)
 
     buffer

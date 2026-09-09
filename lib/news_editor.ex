@@ -35,7 +35,12 @@ defmodule NewsEditor do
   # pays for every link it carries. At six links there is no body at all - the
   # page is a headline over a list, which is exactly what the 1990 captures
   # show.
-  @body_rows %{0 => 10, 1 => 9, 2 => 7, 3 => 5, 4 => 4, 5 => 2, 6 => 0}
+  # Row budgets come from HeadlinePage, which owns the page geometry. They used
+  # to be duplicated here as a literal map; the two agreed with each other and
+  # were wrong together, because neither reserved the rows the headline takes
+  # out of the same space. One source of truth now - if the layout moves, the
+  # prompt moves with it.
+  defp body_rows(n), do: HeadlinePage.body_rows(n)
 
   # Characters per row actually achieved by wrapped prose in the 250-unit body
   # field at char width 5 - measured, not the theoretical 61.
@@ -59,7 +64,7 @@ defmodule NewsEditor do
 
   @doc "Characters of body text available to a story carrying `n` links."
   @spec body_budget(non_neg_integer()) :: non_neg_integer()
-  def body_budget(n), do: Map.get(@body_rows, n, 0) * @chars_per_row
+  def body_budget(n), do: body_rows(n) * @chars_per_row
 
   @doc "Characters available to a headline."
   @spec headline_budget() :: pos_integer()
@@ -89,12 +94,12 @@ defmodule NewsEditor do
   # again with the overage stated. Re-asking beats trimming: the model can drop
   # a whole clause where a trim would cut mid-sentence.
   defp tighten(story, attempts) do
-    budget = Map.get(@body_rows, length(story.substories), 0)
+    budget = body_rows(length(story.substories))
     story = %{story | body: fit_text(story.body, budget, attempts, "story summary")}
 
     subs =
       Enum.map(story.substories, fn sub ->
-        %{sub | body: fit_text(sub.body, @body_rows[0], attempts, "subordinate summary")}
+        %{sub | body: fit_text(sub.body, body_rows(0), attempts, "subordinate summary")}
       end)
 
     %{story | substories: subs}
@@ -256,7 +261,7 @@ defmodule NewsEditor do
     rows =
       0..6
       |> Enum.map_join("\n", fn n ->
-        rows = @body_rows[n]
+        rows = body_rows(n)
 
         "      #{n} link#{if n == 1, do: " ", else: "s"}   #{String.pad_leading(to_string(rows), 2)} lines  (about #{body_budget(n)} characters)" <>
           if(n == 6, do: "   - headline and links only, no summary", else: "")
@@ -279,7 +284,7 @@ defmodule NewsEditor do
 
     #{rows}
 
-    A subordinate story's own summary gets the full #{@body_rows[0]} lines
+    A subordinate story's own summary gets the full #{body_rows(0)} lines
     (about #{body_budget(0)} characters).
     """
   end
