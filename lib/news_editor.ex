@@ -47,8 +47,6 @@ defmodule NewsEditor do
   # Measured on real wrapped summaries in the 250-unit field at char width 5.
   @chars_per_row 58
 
-  @headline_rows 2
-
   # The foot of each page announces the next story. It shares a line with the
   # [NEXT] marker, so it has to be far shorter than a headline - the originals
   # run to about thirty characters ("Exxon Pulls Valdez Cleanup Crew").
@@ -68,7 +66,7 @@ defmodule NewsEditor do
 
   @doc "Characters available to a headline."
   @spec headline_budget() :: pos_integer()
-  def headline_budget, do: @headline_rows * @chars_per_row
+  def headline_budget, do: HeadlinePage.headline_rows() * @chars_per_row
 
   @doc """
   Ask for the day's plan.
@@ -257,7 +255,10 @@ defmodule NewsEditor do
     """
   end
 
-  defp budgets do
+  # Public only so a test can assert this table quotes the real budgets rather
+  # than literals that drift away from the layout.
+  @doc false
+  def budgets do
     rows =
       0..6
       |> Enum.map_join("\n", fn n ->
@@ -275,7 +276,7 @@ defmodule NewsEditor do
     text that overruns is cut, and a summary that lands two lines short reads
     better than one that gets truncated.
 
-      Headline:            2 lines  (about #{headline_budget()} characters)
+      Headline:            #{HeadlinePage.headline_rows()} lines  (about #{headline_budget()} characters)
       Short title:         at most #{@short_title_chars} characters
       Highlight title:     3 lines of at most 17 characters (lead story only)
       Subordinate label:   1 line   (at most #{@label_chars} characters)

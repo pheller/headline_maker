@@ -59,5 +59,17 @@ defmodule HeadlinePageLayoutTest do
         assert NewsEditor.body_budget(n) == HeadlinePage.body_rows(n) * 58
       end
     end
+
+    test "the headline allowance is not duplicated either" do
+      # It lived in three places - HeadlinePage, a NewsEditor attribute, and a
+      # literal in the prompt text. All three now come from one function, so
+      # changing the layout cannot leave the prompt promising the old number.
+      assert NewsEditor.headline_budget() == HeadlinePage.headline_rows() * 58
+    end
+
+    test "the prompt quotes the real headline allowance" do
+      rows = HeadlinePage.headline_rows()
+      assert NewsEditor.budgets() =~ "Headline:            #{rows} lines"
+    end
   end
 end
