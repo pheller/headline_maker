@@ -29,6 +29,15 @@ defmodule NewsEditor do
 
   require Logger
 
+  # How many times to ask the editor for a day's plan before giving up. Two,
+  # because the run uploads nothing on failure and a stale page is the cost of
+  # not trying twice.
+  @plan_tries 2
+
+  # Characters of an unparseable reply to log. Enough to tell a refusal from a
+  # preamble from a truncation, without pasting a day's copy into the log.
+  @reply_sample 400
+
   # Rows available for the story body at each subordinate-link count, from the
   # HEADLINE NEWS layout model (see the applications-trial plans). The link
   # block is bottom-anchored and grows upward into the body's space, so a story
@@ -78,12 +87,52 @@ defmodule NewsEditor do
   @spec plan([[String.t()]], keyword()) :: {:ok, [map()]} | {:error, term()}
   def plan(articles, opts \\ []) when is_list(articles) do
     attempts = Keyword.get(opts, :attempts, 2)
+    tries = Keyword.get(opts, :tries, @plan_tries)
 
-    with {:ok, text} <- Summarizer.complete_raw(prompt(articles)),
-         {:ok, stories} <- parse(text) do
-      {:ok, Enum.map(stories, &tighten(&1, attempts))}
+    # The provider registry is a fixed map of names to modules, so a test
+    # cannot inject one. Taking the completion function as an option is the
+    # smaller seam, and lets the retry be exercised without a live model.
+    complete = Keyword.get(opts, :complete, &Summarizer.complete_raw/1)
+
+    plan_attempt(articles, attempts, tries, complete)
+  end
+
+  # One unusable reply used to cost the whole day: plan/2 asked once, and a
+  # reply that did not parse failed the run, which by design uploads nothing.
+  # The editorial pass is not deterministic, so asking again is the cheapest
+  # possible fix for a one-off.
+  defp plan_attempt(articles, attempts, tries_left, complete) do
+    case complete.(prompt(articles)) do
+      {:ok, text} ->
+        case parse(text) do
+          {:ok, stories} ->
+            {:ok, Enum.map(stories, &tighten(&1, attempts))}
+
+          {:error, reason} ->
+            # Log what actually came back. The failure that prompted this was
+            # :no_json_found, which fires only when the reply has no opening
+            # brace anywhere - so the model answered with something, and the
+            # reply was discarded before anyone could see what.
+            Logger.warning(
+              "Editorial reply did not parse (#{inspect(reason)}); " <>
+                "#{String.length(text)} chars, begins: #{inspect(String.slice(text, 0, @reply_sample))}"
+            )
+
+            retry_or_give_up(reason, articles, attempts, tries_left, complete)
+        end
+
+      {:error, reason} ->
+        Logger.warning("Editorial request failed: #{inspect(reason)}")
+        retry_or_give_up(reason, articles, attempts, tries_left, complete)
     end
   end
+
+  defp retry_or_give_up(_reason, articles, attempts, tries_left, complete) when tries_left > 1 do
+    Logger.info("Asking the editor again (#{tries_left - 1} left after this)")
+    plan_attempt(articles, attempts, tries_left - 1, complete)
+  end
+
+  defp retry_or_give_up(reason, _articles, _attempts, _tries_left, _complete), do: {:error, reason}
 
   # --- Fitting --------------------------------------------------------------
 
