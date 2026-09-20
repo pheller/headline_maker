@@ -167,6 +167,8 @@ defmodule HeadlineObjects do
     {"#{@legend}#{id}.B_1_8_1", encode(@legend <> id, 1, 1, segments)}
   end
 
+  # The label the NEXT button carries on the page before this one: a story's
+  # own short title when the editor gave it one, otherwise its headline.
   defp next_title(story) do
     case Map.get(story, :short_title) do
       t when is_binary(t) and t != "" -> t
@@ -216,9 +218,15 @@ defmodule HeadlineObjects do
     )
   end
 
+  # The id of a story's first subordinate page, or nil when it has none. The
+  # numbered links are laid out from this one id: the subordinate pages take
+  # consecutive ids, so only the first has to be carried around.
   defp first_sub_id([]), do: nil
   defp first_sub_id([%{id: id} | _]), do: id
 
+  # The id n places after `first`, by stepping next_id/1. This is how link n on
+  # a page finds its subordinate page, and why those pages have to be assigned
+  # consecutive ids.
   defp sub_id_at(first, 0), do: first
   defp sub_id_at(first, n), do: sub_id_at(next_id(first), n - 1)
 

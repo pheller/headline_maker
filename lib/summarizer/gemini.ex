@@ -51,6 +51,8 @@ defmodule Summarizer.Gemini do
     end
   end
 
+  # The answer is the first candidate, whose content arrives as a list of parts
+  # to be joined. Later candidates are alternatives and are ignored.
   defp extract_text(%{"candidates" => [%{"content" => %{"parts" => parts}} | _]}) do
     text =
       parts
@@ -63,8 +65,12 @@ defmodule Summarizer.Gemini do
     end
   end
 
+  # A 200 with no candidates at all - a block or a safety stop - reads as an
+  # error here so the chain moves on.
   defp extract_text(body), do: {:error, "unexpected response: #{inspect(body)}"}
 
+  # Configuration, read at call time rather than at compile time, so a release
+  # picks up the environment it is actually run with.
   defp api_key, do: System.get_env("GEMINI_API_KEY")
   defp model, do: System.get_env("GEMINI_MODEL") || @default_model
 end

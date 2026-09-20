@@ -14,6 +14,20 @@ defmodule HeadlineWriter do
   # You should have received a copy of the GNU Affero General Public License along with Prodigy Reloaded. If not,
   # see <https://www.gnu.org/licenses/>.
 
+  @moduledoc """
+  The original HEADLINE NEWS writer: a fixed set of pages, each one headline
+  and one story, rendered straight to NAPLPS and packed as a page set.
+
+  **Mostly dormant.** The current run builds its pages through `NewsEditor`,
+  `HeadlineObjects` and `HeadlinePage` instead, which is what made subordinate
+  link pages and per-story ids possible. Of this module only
+  `debug_delimiter/0` still has callers; `write_headlines/1` and everything
+  under it are kept for reference and are not reached by `HeadlineMaker.main/1`.
+
+  The layout constants below are still the authority on the body field - the
+  same geometry the new path measures against.
+  """
+
   require Logger
   use NaplpsConstants
   import NaplpsWriter
@@ -291,6 +305,8 @@ defmodule HeadlineWriter do
     end)
   end
 
+  # Draw the body text, one line per row down from `top`, at the line pitch.
+  # story_lines/1 has already broken it to fit the field.
   defp draw_story(buffer, story, top) do
     story
     |> story_lines()
@@ -311,6 +327,10 @@ defmodule HeadlineWriter do
     end
   end
 
+  # Stamp this page's number and the set total into an already-built object
+  # header, by taking it apart and putting it back with those two bytes
+  # replaced. The header is a fixed layout, so the sizes below are positions,
+  # not lengths to be computed.
   defp page_setup(buffer, page_number, total_pages) do
     <<
       buf1::binary-size(9),

@@ -127,6 +127,9 @@ defmodule NewsEditor do
     end
   end
 
+  # Ask again while there are tries left, otherwise report the failure that
+  # ended the last attempt. The reason is only carried so the caller sees why
+  # the final try failed, not the first.
   defp retry_or_give_up(_reason, articles, attempts, tries_left, complete) when tries_left > 1 do
     Logger.info("Asking the editor again (#{tries_left - 1} left after this)")
     plan_attempt(articles, attempts, tries_left - 1, complete)
@@ -152,6 +155,12 @@ defmodule NewsEditor do
     %{story | substories: subs}
   end
 
+  # Bring one piece of copy down to its row budget, asking the model to rewrite
+  # it shorter and re-measuring each time.
+  #
+  # The page, not the character count, is the authority: rows/1 wraps the text
+  # exactly as the renderer will. Out of attempts, the text is kept as it
+  # stands and the renderer cuts it - a slightly long story beats no page.
   defp fit_text(text, budget, attempts, what) do
     actual = rows(text)
 
@@ -184,6 +193,10 @@ defmodule NewsEditor do
   @spec rows(String.t()) :: non_neg_integer()
   def rows(text), do: length(NaplpsText.wrap(text, @char_width, @field_width))
 
+  # The rewrite request for one over-long piece of copy. It gives the overshoot
+  # in both lines and characters, because the model cannot see the page, and
+  # asks for whole clauses to go rather than words trimmed everywhere, which is
+  # what keeps the result readable.
   defp shorten_prompt(text, actual, budget) do
     """
     This news summary runs #{actual} lines on the page. It must fit #{budget}.
@@ -264,6 +277,10 @@ defmodule NewsEditor do
     """
   end
 
+  # The instructions half of the editorial prompt: pick the stories, order
+  # them, decide their subordinate coverage, and write to the row budgets the
+  # layout allows. The budgets are interpolated from HeadlinePage rather than
+  # written out, so the prompt cannot drift from the geometry.
   defp task do
     """
     YOUR TASK
@@ -339,6 +356,9 @@ defmodule NewsEditor do
     """
   end
 
+  # The reply format half of the prompt: the JSON shape wanted, and what each
+  # field is for. Kept separate from task/0 so the editorial instructions can
+  # be read without the machinery around them.
   defp output_format do
     """
     OUTPUT
@@ -394,6 +414,11 @@ defmodule NewsEditor do
     end
   end
 
+  # The JSON object out of a reply that may have prose around it. Models
+  # preface an answer often enough that finding the first brace is worth it.
+  # Everything from there to the end is handed to the decoder, which is what
+  # rejects a truncated reply. No brace anywhere means the reply was not an
+  # answer at all - a refusal, say - and that is :no_json_found.
   defp extract_json(text) do
     trimmed = String.trim(text)
 
@@ -404,6 +429,10 @@ defmodule NewsEditor do
     end
   end
 
+  # One story from the decoded JSON as the map the rest of the pipeline uses:
+  # every field present, string-keyed to atom-keyed, and all text folded to
+  # ASCII for the renderer. A missing field becomes "" rather than nil, so
+  # callers need not check for both.
   defp normalize(story) do
     %{
       headline: Summarizer.to_ascii(Map.get(story, "headline", "")),

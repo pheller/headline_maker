@@ -148,6 +148,9 @@ defmodule HighlightsBody do
     end
   end
 
+  # Whether a caller-supplied slot-1 text can be used as written: already
+  # broken into at most @slot1_rows lines, none wider than @slot1_cols.
+  # Returns {:ok, lines} if so, :error to mean "wrap it yourself".
   defp fits?(nil), do: :error
   defp fits?(""), do: :error
 
@@ -187,6 +190,9 @@ defmodule HighlightsBody do
     |> Enum.take(@slot1_rows)
   end
 
+  # One word as one or more pieces, none wider than the box. A word inside the
+  # budget is left alone; a longer one is cut into column-width chunks, with no
+  # hyphen - the slot is monospaced and there is no room to spend on one.
   defp split_long(word) do
     if String.length(word) <= @slot1_cols do
       [word]
@@ -197,6 +203,13 @@ defmodule HighlightsBody do
 
   # --- NAPLPS ---------------------------------------------------------------
 
+  # The page's NAPLPS: fill the six option slots into the template's @@SLOTS@@
+  # marker and transpile the result.
+  #
+  # Slots 1 and 2 are three-line boxes, 4 to 6 single lines; slot 3 is drawn by
+  # the template itself and so is absent here. The coordinates are the
+  # original's, read off the decompiled source. `init: false` because this text
+  # is spliced into an object that already carries its own NAPLPS preamble.
   defp render_nap(slot1, opts) do
     slots =
       [
@@ -220,6 +233,7 @@ defmodule HighlightsBody do
     (head ++ interleave(lines)) |> Enum.join("\n")
   end
 
+  # A one-line slot: no box, just a position and the text.
   defp single(text, origin) do
     Enum.join(["field", "move " <> origin, text_cmd(text)], "\n")
   end
@@ -232,8 +246,12 @@ defmodule HighlightsBody do
     |> List.flatten()
   end
 
+  # One line as a Telidraw `text` command.
   defp text_cmd(text), do: ~s(text "#{escape(text)}")
 
+  # Telidraw delimits text with double quotes and has no escape for one inside
+  # the string, so a quote in a headline becomes an apostrophe. On this page
+  # the difference is a single glyph.
   defp escape(text), do: String.replace(text, "\"", "'")
 
   # --- Object surgery -------------------------------------------------------
@@ -254,6 +272,13 @@ defmodule HighlightsBody do
     head <> <<18 + byte_size(new_body)::16-little>> <> tail3 <> new_body
   end
 
+  # Repoint the options whose destinations have changed, by substituting the
+  # object ids in the packed bytes. Both names are 11 characters, so the
+  # replacement is the same length and nothing has to be reframed - the two
+  # assertions are there to stop a future entry quietly breaking that.
+  #
+  # This rewrites raw object bytes, so an id that also occurred as ordinary
+  # text would be caught too. None of these do.
   defp retarget(obj, opts) do
     Keyword.get(opts, :retarget, @retarget)
     |> Enum.reduce(obj, fn {from, to}, acc ->

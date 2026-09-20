@@ -58,6 +58,8 @@ defmodule Summarizer.Ollama do
     end
   end
 
+  # Configuration, read at call time rather than at compile time, so a release
+  # picks up the environment it is actually run with.
   defp host, do: System.get_env("OLLAMA_HOST") || @default_host
   defp model, do: System.get_env("OLLAMA_MODEL") || @default_model
 end

@@ -17,10 +17,13 @@ defmodule Summarizer.None do
   @moduledoc """
   No summarization at all.
 
-  Declines every prompt, so `HeadlineWriter.choose_summary/3` takes its error
-  branch and trims the original text to length. Useful for running without any
-  model - to see how the untouched feed copy reads, or on a host with neither a
-  local model nor an API key.
+  Declines every prompt, so every caller takes its error branch: feed copy
+  reaches the page as written, untouched by a model. Useful for seeing how the
+  raw copy reads, or on a host with neither a local model nor an API key.
+
+  Note that `NewsEditor.plan/2` cannot degrade - it has no non-model way to
+  rank and cut a page - so a run whose chain is only `none` will not produce a
+  page.
   """
 
   @behaviour Summarizer

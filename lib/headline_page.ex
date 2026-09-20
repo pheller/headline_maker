@@ -142,6 +142,8 @@ defmodule HeadlinePage do
 
   # --- Pieces ---------------------------------------------------------------
 
+  # The black panel the whole page is drawn on. Everything else sits over it,
+  # so it goes down first.
   defp panel(buffer) do
     buffer
     |> select_color(@color_black)
@@ -151,6 +153,14 @@ defmodule HeadlinePage do
     ])
   end
 
+  # Headline and body text. The headline is centred in grey at the top, at most
+  # @headline_rows lines; the body is left-aligned in white beneath it.
+  #
+  # The two are measured together: the body starts as many rows below @body_top
+  # as the headline actually used, and body_rows/2 is told that height, so a
+  # one-line headline hands its spare row to the story instead of leaving a
+  # gap. Both are cut to the rows available rather than being allowed to run
+  # into the link block.
   defp story(buffer, headline, body, n) do
     head_lines = wrap(headline, @body_font, @body_width) |> Enum.take(@headline_rows)
     rows = body_rows(n, length(head_lines))
@@ -168,6 +178,12 @@ defmodule HeadlinePage do
     |> append_byte(@gr_word_wrap_off)
   end
 
+  # The subordinate link block: a grey gutter, the numerals in it, a red rule
+  # above and below, and the labels. Nothing to draw when there are no links.
+  #
+  # Order matters here - the gutter is filled before the numerals go on top of
+  # it, and the colour is set back to grey after the rules, or the labels come
+  # out red.
   defp links(buffer, [], _n), do: buffer
 
   defp links(buffer, labels, n) do
@@ -197,12 +213,17 @@ defmodule HeadlinePage do
     |> labels(labels, first)
   end
 
+  # The link numbers down the gutter, 1..n, stepping down by the link pitch
+  # from the top row. The leading space indents them inside the gutter.
   defp numerals(buffer, n, first) do
     Enum.reduce(0..(n - 1), buffer, fn i, acc ->
       draw_text_abs(acc, " #{i + 1}", {@link_box_left / 256, (first - i * @link_pitch) / 256})
     end)
   end
 
+  # The link captions beside the numerals, on the same rows. Each is wrapped to
+  # the label width and only the first line kept: a caption too long for its
+  # row is cut, never allowed to push the next link down.
   defp labels(buffer, labels, first) do
     labels
     |> Enum.with_index()
@@ -212,6 +233,11 @@ defmodule HeadlinePage do
     end)
   end
 
+  # The trailing "next story ... [NEXT]" line, right-aligned. Its row depends
+  # on whether there is a link block: without one it sits just under the bottom
+  # rule, with one it goes a pitch above the topmost link row. x is computed
+  # from the text's measured width so the line ends at the panel edge, but
+  # never starts left of the label column.
   defp next_line(buffer, nil, _n), do: buffer
 
   defp next_line(buffer, headline, n) do
@@ -251,8 +277,11 @@ defmodule HeadlinePage do
     |> mb_xy({w / 256, h / 256})
   end
 
+  # Wrap to a width, in the cell width of the given font. The height is not
+  # needed for measuring, hence the discard.
   defp wrap(text, {w, _h}, width), do: NaplpsText.wrap(text, w, width)
 
+  # Draw pre-wrapped lines downward from `top`, one `pitch` apart.
   defp lines(buffer, lines, top, pitch, align) do
     lines
     |> Enum.with_index()
@@ -261,6 +290,8 @@ defmodule HeadlinePage do
     end)
   end
 
+  # Where a line starts: the body's left edge, or centred in the body width by
+  # measuring the line and splitting what is left over.
   defp x_for(_line, :left), do: @body_left
 
   defp x_for(line, :center) do

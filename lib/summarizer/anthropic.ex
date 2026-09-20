@@ -105,8 +105,12 @@ defmodule Summarizer.Anthropic do
     end
   end
 
+  # A 200 whose content is not a list at all: report it rather than crash, so
+  # the chain can try the next provider.
   defp extract_text(other), do: {:error, "unexpected content: #{inspect(other)}"}
 
+  # Configuration, read at call time rather than at compile time, so a release
+  # picks up the environment it is actually run with.
   defp api_key, do: System.get_env("ANTHROPIC_API_KEY")
   defp model, do: System.get_env("ANTHROPIC_MODEL") || @default_model
 end

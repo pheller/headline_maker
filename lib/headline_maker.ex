@@ -16,6 +16,38 @@ defmodule HeadlineMaker do
   # You should have received a copy of the GNU Affero General Public License along with Prodigy Reloaded. If not,
   # see <https://www.gnu.org/licenses/>.
 
+  @moduledoc """
+  Command-line entry point: turn a day's wire copy into the HEADLINE NEWS
+  objects the service serves.
+
+  One run is a straight line, and each step has its own module:
+
+      gather/1          fetch and merge the feeds (a `NewsFeeds` module)
+      NewsEditor.plan/1 rank and cut the stories to a page plan
+      write_objects/2   render that plan (`HeadlineObjects`, `HighlightsBody`)
+
+  Any step that cannot finish exits non-zero without writing, because the
+  caller uploads only on success: yesterday's headlines beat a broken tree.
+
+  ## Options
+
+    * `-i`, `--input` - feed URL, or several separated by commas. Default is
+      memeorandum's RSS.
+    * `-f`, `--feedstyle` - the `NewsFeeds` module that reads them, without the
+      `Elixir.` prefix: `MemeorandumFeed` (default), `FoxCouncilFeed`,
+      `RetrocampusFeed`.
+    * `-d`, `--directory` - where the objects are written.
+    * `-s`, `--summarizer` - provider chain for `Summarizer`.
+    * `--stories` - how many stories to ask the feeds for.
+    * `-r`, `--retroguide`, `-a`, `--attribution` - text placed on the page.
+    * `--debuginput`, `--debugoutput` - read canned copy instead of a feed, and
+      dump the chosen copy as text. No short aliases, deliberately.
+
+  The scheduled run on the service passes `-f FoxCouncilFeed` with that API's
+  world, US and business feeds; the default above is what a bare invocation
+  gets.
+  """
+
   def main(argv) do
     {opts, _args, _invalid} =
       OptionParser.parse(argv,
@@ -180,6 +212,7 @@ defmodule HeadlineMaker do
     end
   end
 
+  # Usage text for --help. Kept in step with the switches in main/1 by hand.
   defp print_help do
     IO.puts("""
     Usage: headline_maker [options]

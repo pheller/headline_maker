@@ -35,9 +35,16 @@ defmodule Summarizer do
   which path ran. Every summary logs the provider that produced it.
 
   When no provider in the chain succeeds, `summarize/2` returns
-  `{:error, :no_provider}`. `HeadlineWriter.choose_summary/3` already handles an
-  error by trimming the original text, so an exhausted chain degrades to
-  truncation rather than failing the run.
+  `{:error, :no_provider}`, and each caller decides what that is worth:
+
+  * `NewsEditor.fit_text/4`, asking for an over-long story to be shortened,
+    logs the failure and keeps the text it has - the renderer then wraps it,
+    and the page runs long rather than the run failing.
+  * `NewsEditor.plan/2`, asking for the whole page plan, has nothing to fall
+    back on, so the run exits without writing and the service keeps serving
+    yesterday's tree.
+  * `HeadlineWriter.choose_summary/3` trims the original to length, but that
+    is the older whole-page path and no longer runs - see its moduledoc.
 
   This module owns the prompt so that every provider sends an identical
   instruction and their outputs stay comparable; implementations only carry it
@@ -113,6 +120,10 @@ defmodule Summarizer do
   @spec complete_raw(String.t()) :: {:ok, String.t()} | {:error, term()}
   def complete_raw(prompt) when is_binary(prompt), do: run(prompt)
 
+  # Walk the chain in order and return the first success, skipping any provider
+  # that is missing or unconfigured. The accumulator carries the last failure,
+  # so an exhausted chain reports why the final provider failed rather than a
+  # bare :no_provider - unless nothing was even attempted.
   defp run(prompt) do
     chain()
     |> Enum.reduce_while({:error, :no_provider}, fn provider, _acc ->
@@ -149,8 +160,8 @@ defmodule Summarizer do
   Two things the wording has to get right, both learned the hard way:
 
   * The limit is stated as hard, and the target set below `max_length`. Asking
-    for something "close to" a maximum reliably lands just over it, and
-    `HeadlineWriter.choose_summary/3` then has to trim what came back.
+    for something "close to" a maximum reliably lands just over it, and the
+    caller is then left trimming what came back.
   * The real work on a wire feed is not compression. Story text arrives with
     photo captions, agency credits, datelines, network boilerplate, duplicated
     sentences, and the lede several paragraphs down. Asking only for a summary
@@ -168,6 +179,9 @@ defmodule Summarizer do
   @spec target_length(pos_integer()) :: pos_integer()
   def target_length(max_length), do: max(1, trunc(max_length * @headroom))
 
+  # The instruction text, one clause per kind of text being shortened. Both say
+  # the same three things in the order that works: the hard limit first, then
+  # what to keep and what to cut, then the output format.
   defp instructions(:body, target) do
     """
     Rewrite the news story below as a single self-contained news brief of AT \
