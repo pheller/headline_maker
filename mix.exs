@@ -26,19 +26,12 @@ defmodule HeadlineMaker.MixProject do
       {:httpoison, "~> 1.8.2"},
       {:quinn, "~> 1.1.3"},
       {:floki, "~> 0.36"},
-      # INTERIM: our fork carries StandardMenu, which encodes the XXOPSM00 call
-      # that makes a page's numbered fields navigate. Repoint to
-      # rrcook/prodigy_objects once that is upstreamed.
-      {:prodigy_objects,
-       git: "https://github.com/pheller/prodigy_objects.git", branch: "standard-menu"},
-      # INTERIM: our fork carries NaplpsText (proportional metrics, hyphenation,
-      # line breaking) which the pre-wrapping work needs. Repoint to
-      # rrcook/naplps_writer once that is upstreamed.
-      #
-      # override: prodigy_objects depends on naplps_writer from rrcook's URL,
-      # and mix refuses two sources for one dep without being told which wins.
-      {:naplps_writer,
-       git: "https://github.com/pheller/naplps_writer.git", branch: "text-metrics", override: true}
+      # StandardMenu (the XXOPSM00 call that makes a page's numbered fields
+      # navigate) and NaplpsText (proportional metrics, hyphenation, line
+      # breaking) are both upstream now, so these are plain upstream deps.
+      # naplps_writer needs no override: prodigy_objects names the same source.
+      {:prodigy_objects, git: "https://github.com/rrcook/prodigy_objects.git"},
+      {:naplps_writer, git: "https://github.com/rrcook/naplps_writer.git"}
     ]
   end
 end
