@@ -56,7 +56,7 @@ same way feeds are, and is given as a chain tried in order:
 | `ollama` | a reachable ollama server | Default. `OLLAMA_HOST`, `OLLAMA_MODEL` |
 | `anthropic` (alias `claude`) | `ANTHROPIC_API_KEY` | `ANTHROPIC_MODEL` |
 | `gemini` | `GEMINI_API_KEY` | `GEMINI_MODEL` |
-| `none` | nothing | No LLM; text is trimmed to length instead |
+| `none` | nothing | Declines every prompt - see the note below |
 
 ```sh
 # local model, falling back to the API on a host that cannot run one
@@ -68,6 +68,11 @@ headline_maker -s none
 
 The chain can also be set with the `SUMMARIZER` environment variable; the
 command line wins. Each summary logs which provider produced it, so an
-unattended run can be traced after the fact. If every provider in the chain is
-unconfigured or fails, the story text is trimmed to length rather than the run
-failing.
+unattended run can be traced after the fact.
+
+A model is not optional for a whole run. Choosing and ranking the day's
+stories is itself an editorial pass (`NewsEditor.plan/2`), and it has no
+non-model fallback: if every provider in the chain is unconfigured or fails,
+the run writes nothing and the service keeps serving yesterday's tree. Where a
+failure *is* survivable is shortening an over-long story - there the text is
+kept as written and the page simply runs long.
